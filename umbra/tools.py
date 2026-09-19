@@ -85,6 +85,23 @@ TOOL_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "cd",
+            "description": (
+                "Change the working directory. Use this when the user asks to "
+                "work in, go to, or open another folder."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "the directory to move to"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run",
             "description": "Run a shell command in the working directory.",
             "parameters": {
@@ -105,6 +122,8 @@ _TEXT_TOOLS = [
     (re.compile(r'<grep\s+pattern="([^"]+)"\s*path="([^"]+)"\s*/>', re.I), "grep"),
     (re.compile(r"<ls\s+path='([^']+)'\s*/>", re.I), "ls"),
     (re.compile(r'<ls\s+path="([^"]+)"\s*/>', re.I), "ls"),
+    (re.compile(r"<cd\s+path='([^']+)'\s*/>", re.I), "cd"),
+    (re.compile(r'<cd\s+path="([^"]+)"\s*/>', re.I), "cd"),
     (re.compile(r"<edit\s+path='([^']+)'\s*>([\s\S]*?)</edit>", re.I), "edit"),
     (re.compile(r'<edit\s+path="([^"]+)"\s*>([\s\S]*?)</edit>', re.I), "edit"),
     (re.compile(r"<run>([\s\S]*?)</run>", re.I), "run"),
@@ -124,8 +143,8 @@ def parse_text_tools(text: str) -> list[dict]:
             elif name == "edit":
                 calls.append({"name": "edit", "arguments": {"path": groups[0], "content": groups[1]}})
             else:
-                calls.append({"name": name, "arguments": {"path" if name in (
-                    "read", "ls") else "command": groups[0]}})
+                key = "path" if name in ("read", "ls", "cd") else "command"
+                calls.append({"name": name, "arguments": {key: groups[0]}})
     return calls
 
 

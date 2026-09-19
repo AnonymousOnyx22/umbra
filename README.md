@@ -31,6 +31,12 @@ makes. No cloud APIs, no keys, no account; a session costs $0.00.
   the version on the right. Send a message and the home screen gives way to the
   streaming transcript, with the session name and context usage moving into the
   hint row.
+- **A thinking animation** between sending and the first token — spinner, the
+  ghost's eyes blinking, and a running clock, so a slow local model never looks
+  like a hung one.
+- **The agent can move itself.** Ask it to "go to ~/code/api" and it calls the
+  `cd` tool; the working directory, git repo, branch and the folder in the
+  bottom-left footer all follow.
 - **Watch it work.** Every read, search, edit and command is one categorized,
   timed row in the activity feed — folded by default, one click to open. A run
   of twelve reads folds into a single `read · 12 files` line. `ctrl+e` expands

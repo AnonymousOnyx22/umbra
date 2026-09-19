@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>umbra</title>
+<title>umbra — local coding agent for Ollama</title>
 <meta name="description" content="A terminal coding agent that runs entirely on your own machine. Bring your own Ollama models. Watch every move it makes.">
 <meta property="og:title" content="umbra — local coding agent">
 <meta property="og:description" content="A terminal coding agent that runs entirely on your own machine. Bring your own models. Watch every move it makes.">
@@ -139,10 +139,47 @@
     color:var(--dim); font-size:12.5px; display:flex; gap:16px; flex-wrap:wrap; align-items:center}
   footer a{color:var(--muted)}
   footer .sp{margin-left:auto}
-  @media(max-width:600px){
-    header{padding-top:26px} .term pre{font-size:10px} nav{gap:14px}
-    nav a.hide-sm{display:none}
+  /* The product is a terminal, so the first screen gives the interface room
+     to speak before the feature list begins. */
+  .hero-stage{display:grid;grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);gap:34px;align-items:center;padding:54px 0 28px}
+  header{text-align:left;padding:0}
+  .ghost{width:76px;height:76px;filter:drop-shadow(0 12px 24px rgba(139,116,232,.24))}
+  h1{font-size:clamp(4rem,9vw,7rem);line-height:.92;letter-spacing:-.075em;margin:19px 0 0;color:#f2efff}
+  .wordmark{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .tag{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--violet-pale);margin:20px 0 0}
+  .lede{font-size:clamp(16px,1.5vw,19px);line-height:1.7;margin:19px 0 0;max-width:38ch;color:#c7c5d2}
+  .lede b{color:#f2efff;font-weight:700}
+  .cta{justify-content:flex-start;margin:30px 0 0}
+  .btn{transition:background .18s,border-color .18s,transform .18s}
+  .btn:hover{transform:translateY(-2px)}
+  .badges{margin:22px 0 0;line-height:1.6;color:#aaa7b8}
+  .hero-stage>.term{margin:0;box-shadow:0 28px 85px rgba(0,0,0,.5),0 0 0 1px rgba(139,116,232,.08)}
+  .hero-stage>.term pre{font-size:clamp(10px,1vw,12px);padding:22px 16px}
+  section{padding-top:86px}
+  section h2{font-size:clamp(25px,3vw,34px);letter-spacing:-.04em}
+  .sub{max-width:68ch}
+  .card{transition:border-color .18s,background .18s,transform .18s}
+  .card:hover{background:#191821}
+  .card p{line-height:1.7}
+  .term{margin-top:30px}
+  :where(a,button):focus-visible{outline:2px solid var(--violet-pale);outline-offset:4px}
+  @media(max-width:850px){
+    .hero-stage{grid-template-columns:1fr;gap:30px;padding-top:30px}
+    header{max-width:700px}
+    .hero-stage>.term pre{font-size:12px}
   }
+  @media(max-width:600px){
+    .hero-stage{padding-top:18px}
+    .ghost{width:58px;height:58px}
+    h1{font-size:clamp(4rem,20vw,6rem)}
+    .hero-stage>.term pre,.term pre{font-size:10px}
+    nav{gap:14px;flex-wrap:wrap}
+    nav a.hide-sm{display:none}
+    section{padding-top:62px}
+    .tables{grid-template-columns:1fr}
+    .tbox{overflow-x:auto}
+  }
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.btn,.card{transition:none}}
 </style>
 </head>
 <body>
@@ -160,6 +197,7 @@
   <a href="https://github.com/AnonymousOnyx22/umbra">github</a>
 </nav>
 
+<div class="hero-stage">
 <header>
   <svg class="ghost" viewBox="0 0 64 64" aria-label="umbra ghost">
     <defs>
@@ -172,7 +210,8 @@
     <ellipse cx="40.5" cy="27" rx="3.8" ry="5.4" fill="#12101e"/>
   </svg>
 
-<pre class="wordmark" aria-label="umbra">       █
+<h1>umbra</h1>
+<pre class="wordmark" aria-hidden="true">       █
    █   █ ██ ██ ████  █ ███  ████
    █   █ █ █ █ █   █ ██    █   █
    █   █ █ █ █ █   █ █     █   █
@@ -191,7 +230,7 @@
     <a class="btn primary" href="#install">Install</a>
     <a class="btn" href="https://github.com/AnonymousOnyx22/umbra">View source</a>
   </div>
-  <p class="badges">MIT · Python 3.11+ · Windows / macOS / Linux · $0.00 per session</p>
+  <p class="badges">MIT · Python 3.11+ · Windows / macOS / Linux · local by default</p>
 </header>
 
 <div class="term">
@@ -218,6 +257,7 @@
                                     <span class="w">tab</span> <span class="m">agents</span>   <span class="w">ctrl+p</span> <span class="m">commands</span>
 </pre>
 </div>
+</div>
 
 <section id="watch">
   <h2><span class="hash">#</span>watch it work</h2>
@@ -234,6 +274,7 @@
 
   <span class="d">▸</span> <span class="g">context</span> 4 files pulled in  <span class="d">·</span> <span class="m">api/routes.py, api/models.py, tests/test_users.py, +1 more</span>
   <span class="d">▸</span> <span class="a">search </span> request.json  <span class="d">·</span> <span class="m">7 matches  120ms</span>
+  <span class="v">⠹</span> <span class="vp">● ●</span> <span class="m">thinking…</span> <span class="d">2.4s</span>
   <span class="d">▾</span> <span class="g">read   </span> api/routes.py  <span class="d">·</span> <span class="m">212 lines  8ms</span>
     <span class="d">│</span> <span class="m">@app.post("/users")</span>
     <span class="d">│</span> <span class="m">def create_user():</span>
@@ -265,7 +306,7 @@
     </div>
     <div class="card">
       <h3><span class="pip" style="background:var(--blue)"></span>Timed, live</h3>
-      <p>Rows spin while they run and show how long they took. Diffs are colored inline. <code>esc</code> stops a turn mid-flight.</p>
+      <p>A blinking ghost and a clock hold the space while the model thinks, so a slow local model never looks hung. Rows spin while they run; <code>esc</code> stops a turn.</p>
     </div>
     <div class="card">
       <h3><span class="pip" style="background:var(--amber)"></span>Copyable</h3>
@@ -293,7 +334,7 @@ umbra --model my-coder
     </div>
     <div class="card">
       <h3><span class="pip" style="background:var(--green)"></span>Nothing leaves the box</h3>
-      <p>Your code goes to a model on your own GPU. The only network call is to <code>127.0.0.1:11434</code>.</p>
+      <p>By default, your code goes to Ollama at <code>127.0.0.1:11434</code>. You can also choose another host with <code>--host</code>.</p>
     </div>
     <div class="card">
       <h3><span class="pip" style="background:var(--amber)"></span>Works with small models</h3>
@@ -304,11 +345,11 @@ umbra --model my-coder
 
 <section id="install">
   <h2><span class="hash">#</span>install</h2>
-  <p class="sub">Two minutes, assuming you already have Ollama.</p>
+  <p class="sub">Install Ollama first, then pull the model you want to run.</p>
   <ol class="steps">
     <li>
       <h4>Get a model</h4>
-      <pre class="code">ollama pull qwen2.5-coder:7b</pre>
+      <pre class="code">ollama pull huihui_ai/qwen2.5-coder-abliterate:7b</pre>
     </li>
     <li>
       <h4>Install umbra</h4>
@@ -352,6 +393,7 @@ umbra</pre>
         <tr><td>/model [name]</td><td>switch model, or open the picker</td></tr>
         <tr><td>/agent</td><td>toggle Build / Plan</td></tr>
         <tr><td>/cd &lt;path&gt;</td><td>change the working directory</td></tr>
+        <tr><td><span class="m">"go to ~/code/api"</span></td><td>the agent can cd itself; the footer follows</td></tr>
         <tr><td>/yolo [on|off]</td><td>run without confirmations</td></tr>
         <tr><td>/undo</td><td>restore the last overwritten file</td></tr>
         <tr><td>/audit</td><td>what has been run, and when</td></tr>

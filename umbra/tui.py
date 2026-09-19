@@ -25,7 +25,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Static
 
 from . import __version__
-from .activity import Activity, ActivityGroup
+from .activity import Activity, ActivityGroup, Thinking
 from .compaction import maybe_compact
 from .config import ensure_umbra_dir, load_config, write_setting
 from .discovery import discover_for_message
@@ -145,7 +145,7 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(event.button.id == "yes")
 
 
-_NATIVE_CALLS_RE = re.compile(r"<read|grep|ls|edit|run", re.I)
+_NATIVE_CALLS_RE = re.compile(r"<read|grep|ls|cd|edit|run", re.I)
 
 # Categories worth folding into a group when they repeat. Edits and commands
 # never fold - you always want those on their own line.
@@ -226,6 +226,7 @@ class Umbra(App):
     UserMsg { color: $text; background: #17171b; border-left: thick #3f4c5f;
               padding: 0 1; margin: 0 0 1 0; }
     .stream { margin: 0 0 1 0; }
+    .thinking { height: 1; margin: 0 0 1 0; }
 
     .activity { height: auto; }
     .activity-group { height: auto; }
@@ -794,22 +795,29 @@ class Umbra(App):
         self._audit("undo", f"{target} <- {backup}")
         self._notice("Undo", f"restored {target}\nfrom {backup}")
 
-    def _change_dir(self, raw: str):
-        """Re-root the session, so a Start Menu launch can hop into a project."""
+    def _change_dir(self, raw: str, quiet: bool = False) -> tuple[bool, str]:
+        """Re-root the session and repaint the footer.
+
+        Used by `/cd`, and by the model's own `cd` tool - so "go to projects"
+        actually moves umbra, and the folder in the bottom left follows.
+        """
         if not raw:
-            self._notice("Folder", str(self.workdir))
-            return
+            if not quiet:
+                self._notice("Folder", str(self.workdir))
+            return False, str(self.workdir)
         target = Path(raw.strip("\"'")).expanduser()
         if not target.is_absolute():
             target = self.workdir / target
         try:
             target = target.resolve(strict=True)
         except OSError:
-            self._notice("cd", f"no such directory: {raw}", prefix="warn")
-            return
+            if not quiet:
+                self._notice("cd", f"no such directory: {raw}", prefix="warn")
+            return False, f"no such directory: {raw}"
         if not target.is_dir():
-            self._notice("cd", f"not a directory: {target}", prefix="warn")
-            return
+            if not quiet:
+                self._notice("cd", f"not a directory: {target}", prefix="warn")
+            return False, f"not a directory: {target}"
         self.workdir = target
         self.root = find_repo_root(self.workdir)
         self.branch = current_branch(self.root)
@@ -820,8 +828,11 @@ class Umbra(App):
                        "Earlier file context may be stale.",
         })
         self.store.save(self.session)
-        self._notice("cd", f"{self.workdir}\nrepo: {self.root or '(none)'}"
-                           f"\nbranch: {self.branch or '(none)'}")
+        self._render_chrome()          # the footer follows the folder
+        if not quiet:
+            self._notice("cd", f"{self.workdir}\nrepo: {self.root or '(none)'}"
+                               f"\nbranch: {self.branch or '(none)'}")
+        return True, str(self.workdir)
 
     async def _do_new_session(self, name: str | None = None, auto: bool = False):
         if auto or not name:
@@ -851,13 +862,15 @@ class Umbra(App):
             "content": (
                 "You are umbra, a terminal coding assistant running on local "
                 f"Ollama models. Working directory: {self.workdir}. "
-                "You can read files, grep the repo, list directories, edit "
-                "files, and run shell commands. To use a tool, emit an XML "
-                "tag like <read path='file.py'/> <grep pattern='...' "
-                "path='...'/> <ls path='.'/> <edit path='file.py'>NEW "
-                "CONTENT</edit> or <run>command</run>, OR use native function "
-                "calls if you support them. Prefer reading before editing. "
-                "Each edit replaces the file's entire contents."
+                "You can read files, grep the repo, list directories, change "
+                "directory, edit files, and run shell commands. To use a tool, "
+                "emit an XML tag like <read path='file.py'/> <grep "
+                "pattern='...' path='...'/> <ls path='.'/> <cd "
+                "path='C:/code/app'/> <edit path='file.py'>NEW CONTENT</edit> "
+                "or <run>command</run>, OR use native function calls if you "
+                "support them. When the user asks to go to, open or work in "
+                "another folder, use cd - do not just list it. Prefer reading "
+                "before editing. Each edit replaces the file's entire contents."
             ),
         }
 
@@ -924,14 +937,24 @@ class Umbra(App):
             self._render_chrome()
             self.prompt.focus()
 
-    def _chunk_cb(self, widget: StreamText):
+    def _chunk_cb(self, widget: StreamText, thinking=None):
         app_thread = threading.get_ident()
+        state = {"first": True}
+
+        def deliver(text: str):
+            if state["first"]:
+                state["first"] = False
+                if thinking is not None:
+                    thinking.stop()      # first token - drop the spinner
+                widget.display = True
+            widget.add(text)
+            self._scroll_end()
 
         def cb(text: str):
             if threading.get_ident() == app_thread:
-                widget.add(text)
+                deliver(text)
             else:
-                self.call_from_thread(widget.add, text)
+                self.call_from_thread(deliver, text)
         return cb
 
     def _agent_messages(self) -> list[dict]:
@@ -949,17 +972,30 @@ class Umbra(App):
     async def _assistant_loop(self):
         for _ in range(self.cfg.max_tool_iterations):
             self._render_chrome()
+            # The model is loading and thinking - say so, with a clock, until
+            # the first token lands.
+            thinking = Thinking()
+            self.transcript.mount(thinking)
             stream = StreamText("assistant")
             self.transcript.mount(stream)
+            stream.display = False
             self._scroll_end()
 
             try:
                 native, content = await self.engine.chat(
-                    self._agent_messages(), self._chunk_cb(stream),
+                    self._agent_messages(), self._chunk_cb(stream, thinking),
                 )
             except Exception as exc:  # noqa: BLE001
+                thinking.stop()
+                stream.display = True
                 stream.add(f"\n\n[error] {exc}")
                 return
+            finally:
+                thinking.stop()
+                if stream.text:
+                    stream.display = True
+                else:
+                    stream.remove()
 
             if not native:
                 native = parse_text_tools(content)
@@ -1035,6 +1071,16 @@ class Umbra(App):
             hits = 0 if result.startswith("no matches") else len(result.splitlines())
             row.finish(f"{hits} matches", _clip_body(result))
             return result, True
+
+        if name == "cd":
+            target = str(args.get("path", ""))
+            ok, detail = self._change_dir(target, quiet=True)
+            row = self._activity("cd", detail if ok else target,
+                                 summary="moved" if ok else "not found")
+            if not ok:
+                return f"ERROR: {detail}", False
+            return (f"OK - working directory is now {self.workdir} "
+                    f"(git repo: {self.root or 'none'})"), True
 
         if name in ("edit", "run") and self.agent == "Plan":
             self._activity("warn", f"{name} blocked",

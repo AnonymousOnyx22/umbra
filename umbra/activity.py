@@ -26,6 +26,7 @@ CATEGORIES: dict[str, tuple[str, str, str]] = {
     "ls":      ("list",    "#e8a33d", "listings"),
     "edit":    ("edit",    "#e05561", "edits"),
     "run":     ("run",     "#5aa7e5", "commands"),
+    "cd":      ("cd",      "#a693f0", "moves"),
     "context": ("context", "#67c01e", "files pulled in"),
     "tool":    ("tool",    "#5b8ff5", "tool calls"),
     "think":   ("think",   "#a693f0", "thoughts"),
@@ -162,6 +163,44 @@ class Activity(Vertical):
     def copy_text(self) -> str:
         label, _ = chip(self.prefix)
         return f"{label}  {self.title_text}\n{self._body_text}"
+
+
+class Thinking(Static):
+    """The pause between sending and the first token, made visible.
+
+    A spinner, the ghost's eyes blinking along with it, and a clock - so a slow
+    local model never looks like a hung one.
+    """
+
+    EYES = ["● ●", "● ●", "● ●", "─ ─"]
+
+    def __init__(self, label: str = "thinking"):
+        super().__init__("", markup=True, classes="thinking")
+        self.label = label
+        self.started = time.monotonic()
+        self._frame = 0
+        self._timer = None
+
+    def on_mount(self):
+        self._timer = self.set_interval(1 / 12, self._tick)
+        self._tick()
+
+    def _tick(self):
+        self._frame += 1
+        spin = SPINNER[self._frame % len(SPINNER)]
+        # Blink roughly every two seconds, for a few frames.
+        eyes = self.EYES[3] if self._frame % 26 in (0, 1, 2) else self.EYES[0]
+        elapsed = human_duration(time.monotonic() - self.started)
+        self.update(
+            f"[#8b74e8]{spin}[/#8b74e8] [#a693f0]{eyes}[/#a693f0] "
+            f"[{MUTED}]{self.label}…[/{MUTED}] [{DIM}]{elapsed}[/{DIM}]"
+        )
+
+    def stop(self):
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        self.remove()
 
 
 class ActivityGroup(Vertical):
