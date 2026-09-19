@@ -99,6 +99,10 @@ makes. No cloud APIs, no keys, no account; a session costs $0.00.
    powershell -ExecutionPolicy Bypass -File tools\install_shortcut.ps1
    ```
 
+   The window gets the ghost icon either way: `umbra` sets it on the console
+   at startup (via `WM_SETICON`), so the taskbar shows the ghost rather than
+   Python's icon, however you launched it.
+
    The shortcut opens a console running `umbra`, starting in
    `%USERPROFILE%\Downloads\Projects`, with the ghost icon. Pass
    `-StartIn "C:\some\path"` to start somewhere else, or `-Uninstall` to remove

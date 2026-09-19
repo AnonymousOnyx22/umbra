@@ -36,6 +36,7 @@ from .palette import CommandPalette, ModelPicker
 from .sessions import SessionStore
 from .tokens import messages_tokens
 from .tools import ToolRunner, parse_text_tools, strip_tool_tags
+from .winicon import brand_console
 
 PAL = {
     "read": "#67c01e",
@@ -1378,6 +1379,7 @@ def main(argv=None):
     parser.add_argument("--version", action="version", version=f"umbra {__version__}")
     args = parser.parse_args(argv)
 
+    brand_console()      # ghost in the taskbar, not the Python icon
     cfg = load_config()
     app = Umbra(
         cfg,
