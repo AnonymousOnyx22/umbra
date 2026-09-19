@@ -222,6 +222,23 @@ def backup_file(path: Path) -> str | None:
 
 
 _MAX_RESULT = 60_000
+_DELETE_COMMAND = re.compile(r"(?i)\b(?:del|erase|rd|rmdir|rm|remove-item)\b")
+
+
+def is_destructive_command(command: str) -> bool:
+    """Block model-generated deletion commands, including in YOLO mode."""
+    return bool(_DELETE_COMMAND.search(command))
+
+
+def cd_target(command: str) -> str | None:
+    """Return a plain directory change target, never a compound shell command."""
+    match = re.fullmatch(r"(?is)\s*(?:cd|chdir|set-location)\s+(?:/d\s+)?(.+?)\s*", command)
+    if not match:
+        return None
+    target = match.group(1).strip().strip('"\'')
+    if not target or any(char in target for char in "&|;<>\n\r"):
+        return None
+    return target
 
 
 def _clip(text: str) -> str:
@@ -367,6 +384,8 @@ class ToolRunner:
         return backup
 
     def run(self, command: str) -> str:
+        if is_destructive_command(command):
+            return "BLOCKED: deletion commands must be run manually outside umbra"
         if self.require_git and self.root is None:
             raise RuntimeError("no git repository detected - run git init first")
         try:

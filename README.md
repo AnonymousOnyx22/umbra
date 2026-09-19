@@ -163,8 +163,10 @@ puts the cursor back in the composer.
 ## Total permission mode
 
 `/yolo on` (or `umbra --yolo`, or `auto_approve = true` in the config) removes
-every confirmation and lifts the git-repo requirement, so the agent edits and
-runs commands anywhere on the machine unattended. It is a real handoff — an
+edit and command confirmations and lifts the git-repo requirement. `/yolo on`
+lasts only for the current process; `auto_approve = true` must be set manually
+to enable it at every launch. Model-generated deletion commands remain blocked.
+It is a real handoff — an
 uncensored 7B will occasionally do something wrong — so it comes with:
 
 - every overwritten file copied to `~/.umbra/backups` first,

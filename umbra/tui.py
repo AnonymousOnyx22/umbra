@@ -28,7 +28,7 @@ from textual.widgets import Button, Input, Label, Static
 from . import __version__
 from .activity import Activity, ActivityGroup, Thinking, pulse_markup
 from .compaction import maybe_compact
-from .config import ensure_umbra_dir, load_config, write_setting
+from .config import ensure_umbra_dir, load_config
 from .discovery import discover_for_message
 from .gitrepo import current_branch, find_repo_root, git_init
 from .logo import NAME, TAGLINE, random_suggestion, random_tip, splash_markup
@@ -36,7 +36,7 @@ from .ollama_client import OllamaEngine
 from .palette import CommandPalette, ModelPicker
 from .sessions import SessionStore
 from .tokens import messages_tokens
-from .tools import ToolRunner, parse_text_tools, strip_tool_tags
+from .tools import ToolRunner, cd_target, is_destructive_command, parse_text_tools, strip_tool_tags
 from .winicon import brand_console
 
 PAL = {
@@ -744,6 +744,12 @@ class Umbra(App):
             return
         if text.startswith("/"):
             self._do_command(text)
+        elif target := cd_target(text):
+            self._change_dir(target)
+        elif (re.fullmatch(r"[\w.-]+", text) and
+              (found := self._resolve_dir(text)) is not None and
+              self._norm(found.name) == self._norm(text)):
+            self._change_dir(str(found))
         else:
             self.run_worker(self._handle_user(text), name="turn", exclusive=True)
 
@@ -843,15 +849,14 @@ class Umbra(App):
     # ------------------------------------------------- total permission mode
 
     def _set_yolo(self, arg: str):
-        """Toggle (and persist) unattended mode: no prompts, no repo gate."""
+        """Toggle unattended mode for this process only."""
         want = (not self.yolo) if not arg else arg.lower() in ("on", "true", "1", "yes")
         self.yolo = want
         self.yes = want
-        write_setting("auto_approve", want)
         self._render_chrome()
         if want:
             self._notice("YOLO", (
-                "ON - edits and shell commands run with no confirmation,\n"
+                "ON for this session - edits and shell commands run with no confirmation,\n"
                 "anywhere on this machine, git repo or not.\n"
                 "Overwritten files are backed up; /undo restores the last one,\n"
                 "/audit shows what has been run. esc interrupts a turn."
@@ -1384,6 +1389,17 @@ class Umbra(App):
             return f"OK - applied edit to {args['path']}", False
 
         if name == "run":
+            command = str(args.get("command", ""))
+            if target := cd_target(command):
+                ok, detail = self._change_dir(target, quiet=True)
+                self._activity("cd", detail if ok else target,
+                               summary="moved" if ok else "not found")
+                return (f"OK - working directory is now {self.workdir}" if ok
+                        else f"ERROR: {detail}"), ok
+            if is_destructive_command(command):
+                self._activity("warn", command, summary="blocked",
+                               body="Deletion commands cannot run through Umbra.")
+                return "BLOCKED: deletion commands must be run manually outside umbra", False
             if self.root is None and not self.yes:
                 ok = await self.confirm("No git repo. Run `git init` before commands are allowed?")
                 if ok:
@@ -1391,7 +1407,6 @@ class Umbra(App):
                     runner.root = self.root
                 else:
                     return None, False
-            command = str(args.get("command", ""))
             if not self.yes:
                 ok = await self.confirm(f"Run command?\n$ {command}")
                 if not ok:
@@ -1434,6 +1449,11 @@ def main(argv=None):
 
     brand_console()      # ghost in the taskbar, not the Python icon
     cfg = load_config()
+    start_dir = Path(args.cwd) if args.cwd else Path.cwd()
+    if args.cwd is None and os.name == "nt" and start_dir.resolve() == Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32":
+        projects = Path.home() / "Downloads" / "Projects"
+        if projects.is_dir():
+            start_dir = projects
     app = Umbra(
         cfg,
         model=args.model,
@@ -1442,7 +1462,7 @@ def main(argv=None):
         session_name=args.session,
         yes=args.yes,
         yolo=args.yolo,
-        cwd=Path(args.cwd) if args.cwd else None,
+        cwd=start_dir,
     )
     app.run()
 

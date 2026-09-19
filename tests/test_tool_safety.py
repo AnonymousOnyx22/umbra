@@ -4,11 +4,26 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-from umbra.tools import ToolRunner, parse_text_tools, strip_tool_tags
+from umbra.tools import ToolRunner, cd_target, is_destructive_command, parse_text_tools, strip_tool_tags
 from umbra.gitrepo import list_files
 
 
 class ToolSafetyTests(unittest.TestCase):
+    def test_cd_command_is_routed_without_a_shell(self):
+        self.assertEqual(cd_target('cd C:/Users/Nick/Downloads/Projects/DiscordForge'),
+                         'C:/Users/Nick/Downloads/Projects/DiscordForge')
+        self.assertEqual(cd_target('cd /d "C:\\Users\\Nick\\Downloads\\Projects"'),
+                         'C:\\Users\\Nick\\Downloads\\Projects')
+        self.assertIsNone(cd_target('cd C:/project && del /q *.*'))
+
+    def test_shell_deletion_is_blocked_even_in_yolo_mode(self):
+        for command in ('del /q *.*', 'del *.* /s /q',
+                        'rm -rf project', 'powershell -Command Remove-Item -Recurse *'):
+            self.assertTrue(is_destructive_command(command))
+        self.assertFalse(is_destructive_command('python -m unittest discover -s tests'))
+        with tempfile.TemporaryDirectory() as directory:
+            runner = ToolRunner(None, Path(directory), require_git=False)
+            self.assertIn('BLOCKED', runner.run('del /q *.*'))
     def test_text_calls_keep_model_order_and_optional_grep_path(self):
         calls = parse_text_tools('<run>echo first</run><grep pattern="first"/><read path="x.txt"/>')
         self.assertEqual([call["name"] for call in calls], ["run", "grep", "read"])
