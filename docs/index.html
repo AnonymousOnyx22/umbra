@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>umbra</title>
+<meta name="description" content="A terminal coding agent that runs entirely on your own machine. Bring your own Ollama models. Watch every move it makes.">
+<meta property="og:title" content="umbra — local coding agent">
+<meta property="og:description" content="A terminal coding agent that runs entirely on your own machine. Bring your own models. Watch every move it makes.">
+<meta property="og:type" content="website">
+<link rel="icon" href="umbra.ico">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0b0d; --panel:#131318; --panel-2:#17171b; --line:#26262f;
+    --text:#e6e6ea; --muted:#8a8a99; --dim:#5a5a68;
+    --violet:#8b74e8; --violet-lt:#a693f0; --violet-pale:#c4b8f7;
+    --green:#67c01e; --amber:#e8a33d; --red:#e05561; --blue:#5aa7e5;
+    --radius:14px; --maxw:1080px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:15px; line-height:1.65; -webkit-font-smoothing:antialiased;
+  }
+  /* soft violet glow behind the hero */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:radial-gradient(70rem 40rem at 50% -12rem,rgba(139,116,232,.16),transparent 65%);
+  }
+  .wrap{position:relative; z-index:1; max-width:var(--maxw); margin:0 auto; padding:0 20px}
+  a{color:var(--violet-lt); text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* ---------------------------------------------------------------- nav */
+  nav{display:flex; align-items:center; gap:22px; padding:22px 0; font-size:13px}
+  nav .brand{display:flex; align-items:center; gap:9px; margin-right:auto; font-weight:700; letter-spacing:.04em}
+  nav .brand svg{width:20px; height:20px}
+  nav a{color:var(--muted)} nav a:hover{color:var(--text); text-decoration:none}
+
+  /* --------------------------------------------------------------- hero */
+  header{text-align:center; padding:48px 0 28px}
+  .ghost{width:96px; height:96px; animation:float 5.5s ease-in-out infinite}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+  @media (prefers-reduced-motion:reduce){.ghost{animation:none}}
+  .wordmark{
+    margin:18px 0 0; font-size:clamp(9px,1.9vw,15px); line-height:1.02;
+    white-space:pre; overflow-x:auto; color:var(--violet-pale);
+    background:linear-gradient(100deg,#4c3f7a 0%,#8b74e8 38%,#ded6fb 72%,#fff 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .tag{margin:14px 0 0; color:var(--muted); font-size:15px}
+  .lede{margin:22px auto 0; max-width:660px; color:var(--text); font-size:16px}
+  .lede b{color:var(--violet-pale); font-weight:500}
+  .cta{display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin:30px 0 8px}
+  .btn{
+    display:inline-block; padding:11px 20px; border-radius:10px; font-size:14px;
+    border:1px solid var(--line); background:var(--panel-2); color:var(--text);
+  }
+  .btn:hover{border-color:var(--violet); text-decoration:none}
+  .btn.primary{background:var(--violet); border-color:var(--violet); color:#100d1c; font-weight:700}
+  .btn.primary:hover{background:var(--violet-lt)}
+  .badges{margin-top:14px; color:var(--dim); font-size:12.5px}
+
+  /* ----------------------------------------------------------- terminal */
+  .term{
+    margin:44px 0 0; background:var(--panel); border:1px solid var(--line);
+    border-radius:var(--radius); overflow:hidden;
+    box-shadow:0 24px 70px rgba(0,0,0,.55);
+  }
+  .term-bar{
+    display:flex; align-items:center; gap:8px; padding:10px 14px;
+    background:var(--panel-2); border-bottom:1px solid var(--line);
+  }
+  .dot{width:11px; height:11px; border-radius:50%}
+  .term-title{margin-left:8px; color:var(--dim); font-size:12px}
+  .term pre{
+    margin:0; padding:20px 18px; overflow-x:auto; font-size:12.5px; line-height:1.5;
+    color:#c9c9d4;
+  }
+  .v{color:var(--violet-lt)} .vp{color:var(--violet-pale)} .g{color:var(--green)}
+  .a{color:var(--amber)} .r{color:var(--red)} .b{color:var(--blue)}
+  .m{color:var(--muted)} .d{color:var(--dim)} .w{color:#fff}
+  .grad0{color:#4c3f7a}.grad1{color:#5f4f97}.grad2{color:#7563b8}.grad3{color:#8b74e8}
+  .grad4{color:#a693f0}.grad5{color:#c4b8f7}.grad6{color:#ded6fb}.grad7{color:#fff}
+
+  /* ----------------------------------------------------------- sections */
+  section{padding:68px 0 0}
+  h2{font-size:22px; margin:0 0 6px; letter-spacing:-.01em}
+  h2 .hash{color:var(--violet); margin-right:8px}
+  .sub{color:var(--muted); margin:0 0 26px; font-size:14px}
+  .grid{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(275px,1fr))}
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:20px 20px 22px; transition:border-color .18s, transform .18s;
+  }
+  .card:hover{border-color:#3a3a48; transform:translateY(-2px)}
+  .card h3{margin:0 0 8px; font-size:15px; display:flex; align-items:center; gap:9px}
+  .card h3 .pip{width:8px; height:8px; border-radius:50%; flex:none}
+  .card p{margin:0; color:var(--muted); font-size:13.5px}
+  .card code{color:var(--violet-pale); background:#1d1b28; padding:1px 5px; border-radius:5px; font-size:12.5px}
+
+  pre.code{
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:18px; overflow-x:auto; font-size:13px; color:#c9c9d4; margin:0 0 16px;
+  }
+  pre.code .c{color:var(--dim)}
+  ol.steps{counter-reset:s; list-style:none; padding:0; margin:0}
+  ol.steps>li{
+    counter-increment:s; position:relative; padding:0 0 4px 44px; margin:0 0 22px;
+  }
+  ol.steps>li::before{
+    content:counter(s); position:absolute; left:0; top:1px; width:28px; height:28px;
+    border-radius:8px; background:var(--panel-2); border:1px solid var(--line);
+    color:var(--violet-lt); font-size:13px; display:grid; place-items:center;
+  }
+  ol.steps h4{margin:2px 0 10px; font-size:14.5px; font-weight:500}
+
+  table{width:100%; border-collapse:collapse; font-size:13.5px}
+  th,td{text-align:left; padding:9px 12px; border-bottom:1px solid var(--line)}
+  th{color:var(--dim); font-weight:500; font-size:12px; letter-spacing:.06em; text-transform:uppercase}
+  td:first-child{color:var(--violet-pale); white-space:nowrap; width:1%}
+  .tables{display:grid; gap:24px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .tbox{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden}
+  .tbox h3{margin:0; padding:14px 12px; font-size:13px; color:var(--muted); border-bottom:1px solid var(--line); background:var(--panel-2)}
+  .tbox tr:last-child td{border-bottom:none}
+
+  .warn{
+    border-left:3px solid var(--red); background:#1a1216; border-radius:0 10px 10px 0;
+    padding:16px 18px; color:var(--muted); font-size:13.5px;
+  }
+  .warn b{color:var(--red)}
+
+  footer{margin:80px 0 0; padding:26px 0 46px; border-top:1px solid var(--line);
+    color:var(--dim); font-size:12.5px; display:flex; gap:16px; flex-wrap:wrap; align-items:center}
+  footer a{color:var(--muted)}
+  footer .sp{margin-left:auto}
+  @media(max-width:600px){
+    header{padding-top:26px} .term pre{font-size:10px} nav{gap:14px}
+    nav a.hide-sm{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>
+  <span class="brand">
+    <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 5C19.8 5 10 14.8 10 27v25.6c0 1.6 1.9 2.4 3 1.2l5.3-5.6c.8-.8 2-.8 2.8 0l4.6 4.9c.8.8 2 .8 2.8 0l4.6-4.9c.8-.8 2-.8 2.8 0l4.6 4.9c.8.8 2 .8 2.8 0l4.6-4.9c.8-.8 2-.8 2.8 0l5.3 5.6c1.1 1.2 3 .4 3-1.2V27C54 14.8 44.2 5 32 5z" fill="#8b74e8"/><ellipse cx="24" cy="27" rx="3.6" ry="5" fill="#12101e"/><ellipse cx="40" cy="27" rx="3.6" ry="5" fill="#12101e"/></svg>
+    umbra
+  </span>
+  <a href="#install">install</a>
+  <a href="#models">models</a>
+  <a href="#watch" class="hide-sm">watch it work</a>
+  <a href="#keys" class="hide-sm">keys</a>
+  <a href="https://github.com/AnonymousOnyx22/umbra">github</a>
+</nav>
+
+<header>
+  <svg class="ghost" viewBox="0 0 64 64" aria-label="umbra ghost">
+    <defs>
+      <linearGradient id="gbody" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#b9a7ff"/><stop offset="1" stop-color="#7a63d8"/>
+      </linearGradient>
+    </defs>
+    <path d="M32 4C19.3 4 9 14.3 9 27v26.4c0 1.9 2.3 2.8 3.6 1.4l5.2-5.5c.9-1 2.5-1 3.4 0l4.5 4.8c.9 1 2.5 1 3.4 0l4.5-4.8c.9-1 2.5-1 3.4 0l4.5 4.8c.9 1 2.5 1 3.4 0l5.2-5.5c1.3-1.4 3.6-.5 3.6 1.4V27C55 14.3 44.7 4 32 4z" fill="url(#gbody)"/>
+    <ellipse cx="23.5" cy="27" rx="3.8" ry="5.4" fill="#12101e"/>
+    <ellipse cx="40.5" cy="27" rx="3.8" ry="5.4" fill="#12101e"/>
+  </svg>
+
+<pre class="wordmark" aria-label="umbra">       █
+   █   █ ██ ██ ████  █ ███  ████
+   █   █ █ █ █ █   █ ██    █   █
+   █   █ █ █ █ █   █ █     █   █
+    ████ █ █ █ ████  █      ████</pre>
+
+  <p class="tag">local coding agent</p>
+
+  <p class="lede">
+    A terminal coding agent that runs <b>entirely on your own machine</b>.
+    Bring any Ollama model — including ones you built yourself — and
+    <b>watch every move it makes</b>, categorized and folded away until you
+    want the detail.
+  </p>
+
+  <div class="cta">
+    <a class="btn primary" href="#install">Install</a>
+    <a class="btn" href="https://github.com/AnonymousOnyx22/umbra">View source</a>
+  </div>
+  <p class="badges">MIT · Python 3.11+ · Windows / macOS / Linux · $0.00 per session</p>
+</header>
+
+<div class="term">
+  <div class="term-bar">
+    <span class="dot" style="background:#e05561"></span>
+    <span class="dot" style="background:#e8a33d"></span>
+    <span class="dot" style="background:#67c01e"></span>
+    <span class="term-title">umbra — ~/code/api</span>
+  </div>
+<pre>
+<span class="grad0">   █</span>
+<span class="grad1">   █   █ ██ ██</span> <span class="grad4">████  █ ███  ████</span>
+<span class="grad2">   █   █ █ █ █</span> <span class="grad5">█   █ ██    █   █</span>
+<span class="grad3">   █   █ █ █ █</span> <span class="grad6">█   █ █     █   █</span>
+<span class="grad3">    ████ █ █ █</span> <span class="grad7">████  █      ████</span>
+
+              <span class="m">local coding agent</span>
+
+      <span class="m">C:\Users\you\code</span><span class="w">\api</span>  <span class="d">·</span>  <span class="g">main</span>
+
+
+  <span class="v">█</span>  <span class="m">Ask anything… "Why does /users 500 on empty body?"</span>
+  <span class="v">█</span>  <span class="vp">Build</span> <span class="d">·</span> <span class="w">qwen2.5-coder:14b</span> <span class="m">ollama</span> <span class="d">127.0.0.1:11434</span>
+                                    <span class="w">tab</span> <span class="m">agents</span>   <span class="w">ctrl+p</span> <span class="m">commands</span>
+</pre>
+</div>
+
+<section id="watch">
+  <h2><span class="hash">#</span>watch it work</h2>
+  <p class="sub">Every read, search, edit and command shows up as one line. Open the ones you care about.</p>
+  <div class="term">
+    <div class="term-bar">
+      <span class="dot" style="background:#e05561"></span>
+      <span class="dot" style="background:#e8a33d"></span>
+      <span class="dot" style="background:#67c01e"></span>
+      <span class="term-title">the activity feed — ctrl+e expands everything</span>
+    </div>
+<pre>
+  <span class="d">█</span> <span class="w">Why does /users 500 on an empty body?</span>
+
+  <span class="d">▸</span> <span class="g">context</span> 4 files pulled in  <span class="d">·</span> <span class="m">api/routes.py, api/models.py, tests/test_users.py, +1 more</span>
+  <span class="d">▸</span> <span class="a">search </span> request.json  <span class="d">·</span> <span class="m">7 matches  120ms</span>
+  <span class="d">▾</span> <span class="g">read   </span> api/routes.py  <span class="d">·</span> <span class="m">212 lines  8ms</span>
+    <span class="d">│</span> <span class="m">@app.post("/users")</span>
+    <span class="d">│</span> <span class="m">def create_user():</span>
+    <span class="d">│</span> <span class="m">    body = request.json          # None when the body is empty</span>
+    <span class="d">│</span> <span class="m">    return save(body["email"])   # TypeError -> 500</span>
+  <span class="d">▾</span> <span class="r">edit   </span> api/routes.py  <span class="d">·</span> <span class="m">+6 -2</span>
+    <span class="d">│</span> <span class="vp">@@ -44,7 +44,11 @@</span>
+    <span class="d">│</span> <span class="r">-    body = request.json</span>
+    <span class="d">│</span> <span class="g">+    body = request.get_json(silent=True) or {}</span>
+    <span class="d">│</span> <span class="g">+    if "email" not in body:</span>
+    <span class="d">│</span> <span class="g">+        return {"error": "email is required"}, 400</span>
+  <span class="d">▸</span> <span class="b">run    </span> pytest tests/test_users.py -q  <span class="d">·</span> <span class="m">exit 0  2.4s</span>
+
+  <span class="vp">Empty body made request.json None, so the subscript raised. It now
+  returns 400 with a message instead. Tests pass.</span>
+
+  <span class="v">█</span>  <span class="m">Ask anything…</span>
+  <span class="v">█</span>  <span class="r">YOLO</span> <span class="d">·</span> <span class="vp">Build</span> <span class="d">·</span> <span class="w">qwen2.5-coder:14b</span> <span class="m">ollama</span> <span class="d">127.0.0.1:11434</span>
+</pre>
+  </div>
+  <div class="grid" style="margin-top:16px">
+    <div class="card">
+      <h3><span class="pip" style="background:var(--green)"></span>Categorized</h3>
+      <p>read, search, list, edit, run, context — each with its own color, the target it touched, and a one-line result.</p>
+    </div>
+    <div class="card">
+      <h3><span class="pip" style="background:var(--violet)"></span>Folded by default</h3>
+      <p>Twelve reads in a row become one <code>read · 12 files</code> line. Click any row, or <code>ctrl+e</code> for everything.</p>
+    </div>
+    <div class="card">
+      <h3><span class="pip" style="background:var(--blue)"></span>Timed, live</h3>
+      <p>Rows spin while they run and show how long they took. Diffs are colored inline. <code>esc</code> stops a turn mid-flight.</p>
+    </div>
+    <div class="card">
+      <h3><span class="pip" style="background:var(--amber)"></span>Copyable</h3>
+      <p>Drag to select and <code>ctrl+c</code>, right-click a row to copy it whole, or <code>f12</code> to hand the mouse back to your terminal.</p>
+    </div>
+  </div>
+</section>
+
+<section id="models">
+  <h2><span class="hash">#</span>bring your own models</h2>
+  <p class="sub">Anything Ollama can run, umbra can drive — including models you built or imported yourself.</p>
+  <pre class="code"><span class="c"># pull one from the registry, without leaving umbra</span>
+/pull qwen2.5-coder:14b
+
+<span class="c"># or import your own GGUF and use it the same way</span>
+echo "FROM ./my-finetune.Q5_K_M.gguf" &gt; Modelfile
+ollama create my-coder -f Modelfile
+umbra --model my-coder
+
+<span class="c"># f2 switches between everything `ollama list` reports</span></pre>
+  <div class="grid">
+    <div class="card">
+      <h3><span class="pip" style="background:var(--violet)"></span>No keys, no account</h3>
+      <p>There is no cloud API behind this. Nothing is billed, nothing is rate-limited, and a session costs exactly $0.00.</p>
+    </div>
+    <div class="card">
+      <h3><span class="pip" style="background:var(--green)"></span>Nothing leaves the box</h3>
+      <p>Your code goes to a model on your own GPU. The only network call is to <code>127.0.0.1:11434</code>.</p>
+    </div>
+    <div class="card">
+      <h3><span class="pip" style="background:var(--amber)"></span>Works with small models</h3>
+      <p>Models without function-calling get an XML tool protocol instead, so 7B coders work out of the box.</p>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <h2><span class="hash">#</span>install</h2>
+  <p class="sub">Two minutes, assuming you already have Ollama.</p>
+  <ol class="steps">
+    <li>
+      <h4>Get a model</h4>
+      <pre class="code">ollama pull qwen2.5-coder:7b</pre>
+    </li>
+    <li>
+      <h4>Install umbra</h4>
+      <pre class="code">git clone https://github.com/AnonymousOnyx22/umbra
+cd umbra
+pip install -e .</pre>
+    </li>
+    <li>
+      <h4>Run it in any project</h4>
+      <pre class="code">cd ~/code/my-project
+umbra</pre>
+    </li>
+    <li>
+      <h4>Optional — put it in the Windows Start menu</h4>
+      <pre class="code">powershell -ExecutionPolicy Bypass -File tools\install_shortcut.ps1</pre>
+    </li>
+  </ol>
+</section>
+
+<section id="keys">
+  <h2><span class="hash">#</span>keys &amp; commands</h2>
+  <p class="sub">Everything is reachable from the keyboard; <code>ctrl+p</code> lists it all.</p>
+  <div class="tables">
+    <div class="tbox">
+      <h3>keys</h3>
+      <table>
+        <tr><td>tab</td><td>switch agent — Build / Plan</td></tr>
+        <tr><td>ctrl+p</td><td>command palette</td></tr>
+        <tr><td>f2</td><td>model switcher</td></tr>
+        <tr><td>ctrl+e</td><td>expand / collapse the whole feed</td></tr>
+        <tr><td>ctrl+c</td><td>copy the selection</td></tr>
+        <tr><td>f12</td><td>hand the mouse to your terminal</td></tr>
+        <tr><td>esc</td><td>interrupt the turn</td></tr>
+        <tr><td>ctrl+n</td><td>new session</td></tr>
+      </table>
+    </div>
+    <div class="tbox">
+      <h3>commands</h3>
+      <table>
+        <tr><td>/pull &lt;model&gt;</td><td>download a model</td></tr>
+        <tr><td>/model [name]</td><td>switch model, or open the picker</td></tr>
+        <tr><td>/agent</td><td>toggle Build / Plan</td></tr>
+        <tr><td>/cd &lt;path&gt;</td><td>change the working directory</td></tr>
+        <tr><td>/yolo [on|off]</td><td>run without confirmations</td></tr>
+        <tr><td>/undo</td><td>restore the last overwritten file</td></tr>
+        <tr><td>/audit</td><td>what has been run, and when</td></tr>
+        <tr><td>/compact</td><td>summarize older turns</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="plan">
+  <h2><span class="hash">#</span>two agents</h2>
+  <p class="sub"><code>tab</code> switches between them, and the composer always says which one is live.</p>
+  <div class="grid">
+    <div class="card">
+      <h3><span class="pip" style="background:var(--violet)"></span>Build</h3>
+      <p>Reads, searches, edits files and runs commands. Every edit is a unified diff you approve — unless you've told it not to ask.</p>
+    </div>
+    <div class="card">
+      <h3><span class="pip" style="background:var(--amber)"></span>Plan</h3>
+      <p>Read-only. It investigates and writes you a plan; edits and shell commands are refused at the tool layer, not just discouraged in the prompt.</p>
+    </div>
+  </div>
+  <div class="warn" style="margin-top:22px">
+    <b>On /yolo:</b> it removes every confirmation and lets the agent work anywhere on the machine, git repo or not.
+    Overwritten files are copied to <code>~/.umbra/backups</code> first, <code>/undo</code> puts the last one back,
+    and every edit and command is appended to <code>~/.umbra/audit.log</code>. Worth knowing before you turn it on.
+  </div>
+</section>
+
+<footer>
+  <span>umbra — MIT</span>
+  <a href="https://github.com/AnonymousOnyx22/umbra">github</a>
+  <a href="https://ollama.com">ollama</a>
+  <a href="https://textual.textualize.io">textual</a>
+  <span class="sp">the darkest part of a shadow</span>
+</footer>
+
+</div>
+</body>
+</html>
