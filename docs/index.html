@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>umbra — local coding agent for Ollama</title>
-<meta name="description" content="A terminal coding agent that runs entirely on your own machine. Bring your own Ollama models. Watch every move it makes.">
+<meta name="description" content="Umbra is a local coding agent for Ollama. Bring your model, follow every tool call, and approve changes from your terminal.">
 <meta property="og:title" content="umbra — local coding agent">
-<meta property="og:description" content="A terminal coding agent that runs entirely on your own machine. Bring your own models. Watch every move it makes.">
+<meta property="og:description" content="A local coding agent for Ollama. Bring your model and follow every tool call.">
 <meta property="og:type" content="website">
 <link rel="icon" href="umbra.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -130,7 +130,7 @@
   .tbox tr:last-child td{border-bottom:none}
 
   .warn{
-    border-left:3px solid var(--red); background:#1a1216; border-radius:0 10px 10px 0;
+    border:1px solid #5a323c; background:#1a1216; border-radius:10px;
     padding:16px 18px; color:var(--muted); font-size:13.5px;
   }
   .warn b{color:var(--red)}
@@ -180,6 +180,79 @@
     .tbox{overflow-x:auto}
   }
   @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.btn,.card{transition:none}}
+  /* The page follows the product's transcript: a quiet stage, a vivid trace,
+     then practical setup. The grid belongs to the terminal, not to cards. */
+  body{background:#09090d}
+  body::before{background:radial-gradient(65rem 43rem at 73% 0%,rgba(116,77,223,.19),transparent 65%)}
+  .wrap{max-width:1180px;padding:0 clamp(20px,4vw,48px)}
+  nav{position:relative;min-height:76px;border-bottom:1px solid #302a3a;padding:18px 0}
+  nav .brand{color:#f3efff;font-size:17px;letter-spacing:-.04em}
+  nav .brand svg{width:26px;height:26px}
+  nav a{font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+  nav a:last-child{color:#eee9ff;border:1px solid #51486c;padding:8px 12px;border-radius:6px}
+  nav a:last-child:hover{background:#24202f}
+  .hero-stage{min-height:650px;grid-template-columns:minmax(0,.84fr) minmax(0,1.16fr);gap:clamp(28px,5vw,70px);padding:60px 0 68px}
+  header{position:relative}
+  header::before{content:"";position:absolute;width:170px;height:170px;left:-46px;top:-31px;border:1px solid rgba(166,147,240,.18);border-radius:50%;pointer-events:none}
+  h1{font-size:clamp(5.5rem,12vw,10.5rem);line-height:.82;letter-spacing:-.09em;margin:37px 0 0}
+  .tag{margin-top:32px;color:#bfaeff}
+  .lede{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:clamp(18px,1.8vw,22px);line-height:1.5;max-width:34ch}
+  .btn{border-radius:6px;padding:13px 19px}
+  .btn.primary{background:#aa95ff;border-color:#aa95ff}
+  .btn.primary:hover{background:#c4b8f7}
+  .hero-stage>.term{transform:rotate(-1deg);border-color:#4c426b;box-shadow:0 42px 100px rgba(0,0,0,.64),18px 18px 0 rgba(116,88,199,.10)}
+  .hero-stage>.term .term-bar{background:#201c2b}
+  .term-title{color:#aaa1bf}
+  .proof-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid #3c324f;border-bottom:1px solid #3c324f;margin:0 0 22px}
+  .proof-strip p{margin:0;padding:22px 18px;color:#b9b2c8;font-size:12px;line-height:1.5;text-transform:uppercase;letter-spacing:.06em}
+  .proof-strip p:first-child{padding-left:0}
+  .proof-strip p+p{border-left:1px solid #3c324f}
+  .proof-strip strong{display:block;color:#eee9ff;font-size:15px;letter-spacing:0;text-transform:none;margin-bottom:3px}
+  section{padding:100px 0 0}
+  section+section{border-top:1px solid #24202e;margin-top:100px}
+  section h2{font-size:clamp(32px,4vw,50px);line-height:1.05;letter-spacing:-.06em;color:#f1edfb;margin-bottom:14px}
+  h2 .hash{font-size:.5em;vertical-align:middle;margin-right:15px}
+  .sub{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:17px;line-height:1.5;color:#b9b2c8;margin-bottom:30px}
+  #watch>.term{border-color:#413657;box-shadow:0 24px 75px rgba(0,0,0,.38)}
+  .grid{gap:0;border-top:1px solid #393145;border-bottom:1px solid #393145}
+  #watch .grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  #models .grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  #plan .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .card,.card:hover{border:0;border-radius:0;background:transparent;transform:none}
+  .card{padding:25px 23px 28px 0}
+  .card+.card{border-left:1px solid #393145;padding-left:23px}
+  .card h3{font-size:15px;color:#f2efff}
+  .card p{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#aaa5b6;font-size:14px;line-height:1.6}
+  .grid .pip{border-radius:2px!important}
+  pre.code{background:#13121a;border-color:#383044;border-radius:8px;line-height:1.75}
+  .tbox{border-radius:8px;border-color:#383044}
+  .tbox h3{color:#d9cff7}
+  td,th{border-color:#302a3a}
+  footer{margin-top:110px}
+  @media(max-width:950px){
+    .hero-stage{grid-template-columns:1fr;min-height:0;padding:48px 0 65px}
+    .hero-stage>.term{transform:none;box-shadow:0 24px 65px rgba(0,0,0,.5)}
+    header::before{left:-20px}
+    #watch .grid,#models .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+    #watch .card:nth-child(3),#models .card:nth-child(3){border-left:0;padding-left:0;border-top:1px solid #393145}
+    #watch .card:nth-child(4){border-top:1px solid #393145}
+  }
+  @media(max-width:700px){
+    nav{gap:12px}
+    nav a{font-size:11px}
+    nav .brand{width:100%}
+    .hero-stage{padding-top:40px}
+    h1{font-size:clamp(5rem,23vw,8rem)}
+    .proof-strip{grid-template-columns:1fr}
+    .proof-strip p,.proof-strip p:first-child{padding:14px 0}
+    .proof-strip p+p{border-left:0;border-top:1px solid #3c324f}
+    section{padding-top:68px}
+    section+section{margin-top:68px}
+    #watch .grid,#models .grid,#plan .grid{grid-template-columns:1fr}
+    .card,.card+.card{padding:21px 0;border-left:0}
+    .card+.card{border-top:1px solid #393145}
+  }
+  @media(prefers-reduced-motion:reduce){.hero-stage>.term{transform:none}}
 </style>
 </head>
 <body>
@@ -220,7 +293,7 @@
   <p class="tag">local coding agent</p>
 
   <p class="lede">
-    A terminal coding agent that runs <b>entirely on your own machine</b>.
+    A terminal coding agent that runs with <b>Ollama on your own machine</b>.
     Bring any Ollama model — including ones you built yourself — and
     <b>watch every move it makes</b>, categorized and folded away until you
     want the detail.
@@ -259,6 +332,12 @@
 </div>
 </div>
 
+<div class="proof-strip" aria-label="Umbra at a glance">
+  <p><strong>Your model</strong>Choose anything Ollama can run</p>
+  <p><strong>Your call</strong>Preview edits and commands before they run</p>
+  <p><strong>Your view</strong>Follow each tool in the activity feed</p>
+</div>
+
 <section id="watch">
   <h2><span class="hash">#</span>watch it work</h2>
   <p class="sub">Every read, search, edit and command shows up as one line. Open the ones you care about.</p>
@@ -292,7 +371,7 @@
   returns 400 with a message instead. Tests pass.</span>
 
   <span class="v">█</span>  <span class="m">Ask anything…</span>
-  <span class="v">█</span>  <span class="r">YOLO</span> <span class="d">·</span> <span class="vp">Build</span> <span class="d">·</span> <span class="w">qwen2.5-coder:14b</span> <span class="m">ollama</span> <span class="d">127.0.0.1:11434</span>
+  <span class="v">█</span>  <span class="vp">Build</span> <span class="d">·</span> <span class="w">qwen2.5-coder:14b</span> <span class="m">ollama</span> <span class="d">127.0.0.1:11434</span>
 </pre>
   </div>
   <div class="grid" style="margin-top:16px">
