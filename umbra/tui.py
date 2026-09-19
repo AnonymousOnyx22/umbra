@@ -16,6 +16,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from uuid import uuid4
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -313,14 +314,19 @@ class Umbra(App):
         self.agent = AGENTS[0]
         self._models: list[str] = []
 
-        name = resume or session_name or cfg.default_session
-        existing = self.store.load(name)
+        # Fresh chat every launch, like opencode: only reopen a past session
+        # when the user explicitly asks for one with --resume/--session.
+        # Otherwise a new, uniquely-named session so old prompts never carry
+        # over (it is still saved, so /sessions and /resume can find it).
+        name = resume or session_name
+        existing = self.store.load(name) if name else None
         if existing is not None:
             existing.cwd = str(self.workdir)
             existing.model = self.model
             self.session = existing
         else:
-            self.session = self.store.new(name, str(self.workdir), self.model)
+            fresh = name or f"chat-{time.strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:4]}"
+            self.session = self.store.new(fresh, str(self.workdir), self.model)
             self.session.messages.append(self._fresh_system_prompt())
 
         self._turn_tokens = 0
