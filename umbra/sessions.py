@@ -28,7 +28,12 @@ class Session:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Session":
-        return cls(**data)
+        allowed = cls.__dataclass_fields__
+        clean = {k: v for k, v in data.items() if k in allowed}
+        for key in ("name", "cwd", "model"):
+            if not clean.get(key):
+                clean[key] = ""
+        return cls(**clean)
 
 
 class SessionStore:

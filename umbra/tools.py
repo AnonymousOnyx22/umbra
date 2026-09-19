@@ -165,6 +165,9 @@ def strip_tool_tags(text: str) -> str:
     """
     for rx, _name in _TEXT_TOOLS:
         text = rx.sub("", text)
+    # Models like to wrap the tags in a fence; don't leave ```xml ``` behind.
+    text = re.sub(r"```[a-zA-Z]*[ \t]*\n\s*```", "", text)
+    text = re.sub(r"^```[a-zA-Z]*[ \t]*$", "", text, flags=re.M)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
@@ -218,7 +221,6 @@ def backup_file(path: Path) -> str | None:
     return str(dest)
 
 
-_MAX_READ = 120_000
 _MAX_RESULT = 60_000
 
 
@@ -244,8 +246,31 @@ class ToolRunner:
         if not path.resolve().is_relative_to(self.root.resolve()):
             raise RuntimeError(f"edit target is outside the git repository: {path}")
 
+    def _restricted(self, path: Path) -> str | None:
+        """None if `path` may be read, else an ERROR string.
+
+        Read-only tools stay inside the working area: the repo when one is
+        present (otherwise the current folder). `--yolo` lifts the gate, making
+        the whole machine fair game.
+        """
+        if not self.require_git:
+            return None
+        base = self.root if self.root is not None else self.workdir
+        if base is None:
+            return None
+        try:
+            inside = path.resolve().is_relative_to(base.resolve())
+        except OSError:
+            inside = False
+        if not inside:
+            return f"ERROR: outside the working area ({base}) - only files under it may be read"
+        return None
+
     def read(self, path: str) -> str:
         p = _resolve(self.root or self.workdir, self.workdir, path)
+        restricted = self._restricted(p)
+        if restricted:
+            return restricted
         if not p.is_file():
             return f"ERROR: no such file: {p}"
         try:
@@ -255,6 +280,9 @@ class ToolRunner:
 
     def ls(self, path: str) -> str:
         p = _resolve(self.root or self.workdir, self.workdir, path or ".")
+        restricted = self._restricted(p)
+        if restricted:
+            return restricted
         if not p.is_dir():
             return f"ERROR: no such directory: {p}"
         try:
@@ -269,6 +297,9 @@ class ToolRunner:
         from .gitrepo import list_files
 
         base = _resolve(self.root or self.workdir, self.workdir, path or ".")
+        restricted = self._restricted(base)
+        if restricted:
+            return restricted
         files = list_files(self.root, base) if self.root else list(base.rglob("*"))
         try:
             rx = __import__("re").compile(pattern)
@@ -276,7 +307,7 @@ class ToolRunner:
             return f"ERROR: bad pattern: {exc}"
         hits = []
         for f in files:
-            if not f.is_file() or (self.root and not str(f).startswith(str(self.root))):
+            if not f.is_file() or (self.root and not f.is_relative_to(self.root)):
                 continue
             try:
                 for i, line in enumerate(f.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):

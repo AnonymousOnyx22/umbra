@@ -5,8 +5,6 @@ context-budget indicator). The sidebar always shows it as an estimate.
 """
 from __future__ import annotations
 
-MESSAGES = 0
-
 _TAX = 12  # per-message framing overhead in "tokens"
 
 

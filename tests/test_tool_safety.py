@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-from umbra.tools import ToolRunner, parse_text_tools
+from umbra.tools import ToolRunner, parse_text_tools, strip_tool_tags
 from umbra.gitrepo import list_files
 
 
@@ -57,6 +57,49 @@ class ToolSafetyTests(unittest.TestCase):
             (selected / "one.py").write_text("one", encoding="utf-8")
             (root / "other.py").write_text("other", encoding="utf-8")
             self.assertEqual(list_files(root, selected), [(selected / "one.py").resolve()])
+
+    def test_read_grep_ls_stay_inside_repo_when_gated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            root.mkdir()
+            (root / "code.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
+            outside_dir = Path(directory) / "elsewhere"
+            outside_dir.mkdir()
+            (outside_dir / "secret.txt").write_text("s3cret", encoding="utf-8")
+            runner = ToolRunner(root, root)
+            self.assertIn("outside the working area", runner.read(str(outside_dir / "secret.txt")))
+            self.assertIn("outside the working area", runner.grep("s3cret", str(outside_dir)))
+            self.assertIn("outside the working area", runner.ls(str(outside_dir)))
+            self.assertIn("def foo", runner.read("code.py"))
+            self.assertEqual(runner.ls(".").strip(), "code.py")
+
+    def test_read_uses_workdir_when_no_repo_present(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "inner.txt").write_text("hello", encoding="utf-8")
+            runner = ToolRunner(None, root)
+            self.assertIn("hello", runner.read("inner.txt"))
+            self.assertIn("outside the working area",
+                          runner.read(str(root.parent / "outside.txt")))
+
+    def test_yolo_mode_removes_read_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outside = root.parent / "elsewhere.txt"
+            outside.write_text("free read", encoding="utf-8")
+            runner = ToolRunner(None, root, require_git=False)
+            self.assertIn("free read", runner.read(str(outside)))
+
+    def test_strip_tool_tags_keeps_prose(self):
+        text = ('Here is the change.\n<read path="a.py"/>\n'
+                '<edit path="b.py">NEW BODY</edit>\n<run>git status</run>\nDone.')
+        out = strip_tool_tags(text)
+        self.assertIn("Here is the change.", out)
+        self.assertIn("Done.", out)
+        self.assertNotIn("<read", out)
+        self.assertNotIn("<edit", out)
+        self.assertNotIn("NEW BODY", out)
+        self.assertNotIn("<run", out)
 
 
 if __name__ == "__main__":

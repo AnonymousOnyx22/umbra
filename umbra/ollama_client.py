@@ -10,6 +10,22 @@ from typing import Callable
 
 from .tools import TOOL_SCHEMA, normalize_calls
 
+_TOOLS_FALLBACK_HINTS = (
+    "tool", "function", "unsupported", "schema", "template",
+    "does not support", "unknown field", "not implemented",
+)
+
+
+def _looks_like_tools_rejection(exc: Exception) -> bool:
+    """True when the error sounds like the model refusing the `tools=` param.
+
+    Only these fall back to the text protocol. A connection error, auth
+    failure or missing model must surface as-is instead of getting masked by a
+    mystery retry.
+    """
+    text = f"{exc}".lower()
+    return any(hint in text for hint in _TOOLS_FALLBACK_HINTS)
+
 
 class OllamaEngine:
     def __init__(self, host: str, model: str):
@@ -94,7 +110,7 @@ class OllamaEngine:
                 )
                 break
             except Exception as exc:  # noqa: BLE001
-                if attempt == 0 and tools_enabled:
+                if attempt == 0 and tools_enabled and _looks_like_tools_rejection(exc):
                     tools_enabled = False
                     continue
                 raise self._raise_dep_missing(exc) from exc

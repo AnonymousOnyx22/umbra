@@ -44,12 +44,6 @@ def maybe_compact(
     if len(messages) <= keep + 2:
         return messages, False
 
-    prefix = []
-    for m in messages:
-        prefix.append(m)
-        if m.get("role") in ("user", "assistant"):
-            break
-    prefix = prefix[1:]  # drop system framing but keep its content
     side = [m for m in messages if m.get("role") == "system"]
     body = [m for m in messages if m.get("role") != "system"]
     if len(body) <= keep:

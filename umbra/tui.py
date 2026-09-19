@@ -102,11 +102,6 @@ class Block(Vertical):
             return
         self.collapsed = not self.collapsed
 
-    def on_mouse_down(self, event):
-        if getattr(event, "button", 1) == 3:
-            self.app.copy_block(self)
-            event.stop()
-
     @property
     def copy_text(self) -> str:
         return f"{self._prefix}  {self._header_text}\n{self._body_text}"
@@ -128,6 +123,8 @@ class StreamText(Static):
 
 
 class ConfirmScreen(ModalScreen[bool]):
+    BINDINGS = [Binding("escape", "no", "no", show=False)]
+
     def __init__(self, question: str, yes_label: str = "Yes", no_label: str = "No"):
         super().__init__()
         self.question = question
@@ -144,6 +141,9 @@ class ConfirmScreen(ModalScreen[bool]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "yes")
+
+    def action_no(self) -> None:
+        self.dismiss(False)
 
 
 _NATIVE_CALLS_RE = re.compile(r"<read|grep|ls|cd|edit|run", re.I)
@@ -279,7 +279,7 @@ class Umbra(App):
         Binding("tab", "cycle_agent", "agents", priority=True),
         Binding("f2", "pick_model", "model", priority=True),
         Binding("ctrl+n", "new_session", "new session"),
-        Binding("escape", "interrupt", "interrupt", priority=True, show=False),
+        Binding("escape", "interrupt", "interrupt", show=False),
         # Click-out recovery and copying. ctrl+c is already bound by Textual to
         # copy the drag-selection; these cover the rest.
         Binding("ctrl+shift+c", "copy_selection", "copy", show=False),
@@ -302,6 +302,7 @@ class Umbra(App):
         self._mouse_off = False
         self._armed = False
         self._busy = False
+        self._turn_calls: set = set()
         self._pulse_frame = 0
         self._pulse_timer = None
         self.workdir = (cwd or Path.cwd()).resolve()
@@ -370,7 +371,7 @@ class Umbra(App):
         self._render_chrome()
         self.run_worker(self._load_models(), name="models")
 
-        if self.root is None:
+        if self.root is None and not self.yolo:
             self.run_worker(self._offer_git_init(), name="git-prompt")
 
     # ---------------------------------------------------------- home/chat
@@ -510,9 +511,16 @@ class Umbra(App):
         row = Activity(prefix, title, body, summary=summary, running=running,
                        expanded=expanded, body_markup=diff)
 
-        last = self.transcript.children[-1] if self.transcript.children else None
+        # Group against the last row *I* mounted rather than the last DOM
+        # child: empty replies and the thinking row are removed asynchronously,
+        # and while they linger they break a run of reads apart.
+        last = getattr(self, "_last_row", None)
+        if last is not None and not last.is_mounted:
+            last = None
+
         if isinstance(last, ActivityGroup) and last.prefix == prefix:
             last.add(row)
+            # `_last_row` stays the group, so the next row joins it too.
         elif (isinstance(last, Activity) and last.prefix == prefix
               and not last.running and prefix in _GROUPABLE):
             # Second row of a kind: retire the standalone row into a new group.
@@ -522,8 +530,10 @@ class Umbra(App):
             group = ActivityGroup(prefix, [previous, row])
             self.transcript.mount(group, after=last)
             last.remove()
+            self._last_row = group
         else:
             self.transcript.mount(row)
+            self._last_row = row
         self._scroll_end()
         return row
 
@@ -1079,37 +1089,54 @@ class Umbra(App):
         result = await self.push_screen(screen, wait_for_dismiss=True)
         return bool(result)
 
+    def _gather_context(self, text: str, budget_chars: int) -> list[tuple[str, str, int]]:
+        """Keyword-mine + read the top files; runs off the event loop.
+
+        Returns (relative path, budget-capped content, line count) triples.
+        Cheap, but it walks the repo and reads files, so it must not block the
+        TUI - call it via asyncio.to_thread.
+        """
+        if budget_chars <= 0:
+            return []
+        files = discover_for_message(
+            self.workdir, self.root, text,
+            self.cfg.discovery_top_n, self.cfg.discovery_max_file_chars,
+        )
+        out: list[tuple[str, str, int]] = []
+        for f in files:
+            if budget_chars <= 0:
+                break
+            try:
+                content = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            rel = f.relative_to(self.root) if self.root else f
+            short = content[: min(self.cfg.discovery_max_file_chars, budget_chars)]
+            budget_chars -= len(short)
+            lines = len(content.splitlines())
+            out.append((str(rel), short, lines))
+        return out
+
     async def _handle_user(self, text: str):
         try:
             self._thinking = True
+            self._turn_calls = set()          # fresh per user message
             self._set_busy(True)
             if self._home:
                 self._render_home(False)
             self._append_user(text)
             self.session.messages.append({"role": "user", "content": text})
 
-            files = discover_for_message(
-                self.workdir, self.root, text,
-                self.cfg.discovery_top_n, self.cfg.discovery_max_file_chars,
-            )
-            if files:
-                remaining = max(0, self.cfg.context_window // 4) * 4
-                for f in files:
-                    if remaining <= 0:
-                        break
-                    try:
-                        content = f.read_text(encoding="utf-8", errors="replace")
-                    except OSError:
-                        continue
-                    rel = f.relative_to(self.root) if self.root else f
-                    short = content[: min(self.cfg.discovery_max_file_chars, remaining)]
-                    remaining -= len(short)
-                    self._activity("context", str(rel), _clip_body(short),
-                                   summary=_count(content, "lines"))
-                    self.session.messages.append({
-                        "role": "system",
-                        "content": f"### Relevant file: {rel}\n```\n{short}\n```",
-                    })
+            budget = max(0, self.cfg.context_window // 4) * 4
+            gathered = await asyncio.to_thread(self._gather_context, text, budget)
+            for rel, short, lines in gathered:
+                self._activity("context", rel, _clip_body(short),
+                               summary=f"{lines:,} lines")
+                self.session.messages.append({
+                    "role": "system",
+                    "content": f"### Relevant file: {rel}\n```\n{short}\n```",
+                })
+            if gathered:
                 self._scroll_end()
 
             self.store.save(self.session)
@@ -1164,77 +1191,84 @@ class Umbra(App):
         return messages
 
     async def _assistant_loop(self):
-        for _ in range(self.cfg.max_tool_iterations):
-            self._render_chrome()
-            # The model is loading and thinking - say so, with a clock, until
-            # the first token lands.
-            thinking = Thinking()
-            self.transcript.mount(thinking)
-            stream = StreamText("assistant")
-            self.transcript.mount(stream)
-            stream.display = False
-            self._scroll_end()
+        try:
+            for _ in range(self.cfg.max_tool_iterations):
+                self._render_chrome()
+                # The model is loading and thinking - say so, with a clock, until
+                # the first token lands.
+                thinking = Thinking()
+                self.transcript.mount(thinking)
+                stream = StreamText("assistant")
+                self.transcript.mount(stream)
+                stream.display = False
+                self._scroll_end()
 
-            try:
-                native, content = await self.engine.chat(
-                    self._agent_messages(), self._chunk_cb(stream, thinking),
-                )
-            except Exception as exc:  # noqa: BLE001
-                thinking.stop()
-                stream.display = True
-                stream.add(f"\n\n[error] {exc}")
-                return
-            finally:
-                thinking.stop()
-                if stream.text:
+                try:
+                    native, content = await self.engine.chat(
+                        self._agent_messages(), self._chunk_cb(stream, thinking),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    thinking.stop()
                     stream.display = True
+                    stream.add(f"\n\n[error] {exc}")
+                    return
+                finally:
+                    thinking.stop()
+                    if stream.text:
+                        stream.display = True
+                    else:
+                        stream.remove()
+
+                if self.engine.cancelled:
+                    break
+
+                if not native:
+                    native = parse_text_tools(content)
+
+                if not native:
+                    self.session.messages.append({"role": "assistant", "content": stream.text})
+                    break
+
+                # The tool tags become feed rows, so don't also leave the raw XML
+                # sitting in the reply. What's left is the model's prose, if any.
+                prose = strip_tool_tags(stream.text)
+                if prose.strip():
+                    stream.update(prose)
+                    stream.text = prose
                 else:
                     stream.remove()
 
-            if self.engine.cancelled:
-                break
+                assistant_msg = {"role": "assistant", "content": stream.text or content}
+                if self.engine.last_native:
+                    assistant_msg["tool_calls"] = self._native_form(native)
+                self.session.messages.append(assistant_msg)
 
-            if not native:
-                native = parse_text_tools(content)
+                for call in native:
+                    result, ok = await self._execute_call(call)
+                    if result is None:  # user rejected -> stop the turn
+                        self._add_block("Cancelled", "edit/command declined by user",
+                                        prefix="warn")
+                        return
+                    self.session.messages.append({
+                        "role": "tool",
+                        "name": call["name"],
+                        "content": result,
+                    })
+                self._scroll_end()
 
-            if not native:
-                self.session.messages.append({"role": "assistant", "content": stream.text})
-                break
-
-            # The tool tags become feed rows, so don't also leave the raw XML
-            # sitting in the reply. What's left is the model's prose, if any.
-            prose = strip_tool_tags(stream.text)
-            if prose.strip():
-                stream.update(prose)
-                stream.text = prose
-            else:
-                stream.remove()
-
-            assistant_msg = {"role": "assistant", "content": stream.text or content}
-            if self.engine.last_native:
-                assistant_msg["tool_calls"] = self._native_form(native)
-            self.session.messages.append(assistant_msg)
-
-            for call in native:
-                result, ok = await self._execute_call(call)
-                if result is None:  # user rejected -> stop the turn
-                    self._add_block("Cancelled", "edit/command declined by user",
-                                    prefix="warn")
-                    return
-                self.session.messages.append({
-                    "role": "tool",
-                    "name": call["name"],
-                    "content": result,
-                })
-            self._scroll_end()
-
-        self.session.messages, did_compact = maybe_compact(
-            self.session.messages, self.cfg.context_window, self.cfg.compact_ratio)
-        if did_compact:
-            self._add_block("Compact", "older turns summarized to free context",
-                            prefix="info")
-        self.store.save(self.session)
-        self._render_chrome()
+        finally:
+            # Save no matter how the turn ended (interrupt, rejected edit,
+            # engine error) so a partial turn survives to /resume.
+            self.session.messages, did_compact = maybe_compact(
+                self.session.messages, self.cfg.context_window, self.cfg.compact_ratio)
+            if did_compact:
+                self._add_block("Compact", "older turns summarized to free context",
+                                prefix="info")
+            try:
+                self.store.save(self.session)
+            except Exception:  # noqa: BLE001
+                pass
+            self._render_chrome()
 
     def _native_form(self, calls) -> list[dict]:
         return [
@@ -1250,6 +1284,19 @@ class Umbra(App):
         )
         name = call["name"]
         args = call.get("arguments", {}) or {}
+
+        # Small models get stuck repeating a harmless call - six identical
+        # `ls` in a row eats the whole tool budget. Answer the repeat from
+        # what we already told it, and say so, instead of running it again.
+        if name in ("read", "ls", "grep", "cd"):
+            fingerprint = (name, repr(sorted(args.items())))
+            if fingerprint in self._turn_calls:
+                self._activity(name, str(args.get("path", args.get("pattern", ""))),
+                               summary="repeat - skipped")
+                return (f"You already called {name} with these arguments this "
+                        "turn and have the result above. Do not call it again; "
+                        "use what you have and answer the user."), False
+            self._turn_calls.add(fingerprint)
 
         if name == "read":
             path = str(args.get("path", ""))
