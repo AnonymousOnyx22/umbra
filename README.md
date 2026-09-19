@@ -1,7 +1,10 @@
 # umbra
 
-A terminal coding assistant, shaped like opencode, backed entirely by **local
-Ollama models** — no cloud APIs, no API keys, cost is always $0.00.
+**[anonymousonyx22.github.io/umbra](https://anonymousonyx22.github.io/umbra/)**
+
+A terminal coding agent that runs **entirely on your own machine**. Bring any
+Ollama model — including ones you built yourself — and watch every move it
+makes. No cloud APIs, no keys, no account; a session costs $0.00.
 
 ```
                   ▄███▄
@@ -28,14 +31,22 @@ Ollama models** — no cloud APIs, no API keys, cost is always $0.00.
   the version on the right. Send a message and the home screen gives way to the
   streaming transcript, with the session name and context usage moving into the
   hint row.
-- **Build / Plan agents** — `tab` toggles them. Plan mode is read-only: the
-  model investigates and writes a plan instead of touching files.
-- **Command palette** (`ctrl+p`) and **model switcher** (`f2`, listing whatever
-  `ollama list` reports).
+- **Watch it work.** Every read, search, edit and command is one categorized,
+  timed row in the activity feed — folded by default, one click to open. A run
+  of twelve reads folds into a single `read · 12 files` line. `ctrl+e` expands
+  everything; diffs are colored inline; rows spin while they run.
+- **Bring your own models.** `/pull <model>` fetches anything from the Ollama
+  registry without leaving the TUI, `f2` switches between everything
+  `ollama list` reports, and a model you built from a Modelfile or imported
+  from a GGUF works exactly like a registry one.
+- **Build / Plan agents** — `tab` toggles them. Plan mode is read-only: edits
+  and commands are refused at the tool layer, not just discouraged in the
+  prompt.
+- **Command palette** (`ctrl+p`) — every command, filterable.
 - **Auto file discovery** — no manual `/add`. Each message is keyword-mined, the
   repo is walked (respecting `.gitignore`), files are ranked by
-  filename/content matches, and the top-N are injected into context as
-  collapsible `Read <file>` traces.
+  filename/content matches, and the top-N are pulled into context as a folded
+  `context · N files pulled in` row.
 - **Tool calling** two ways:
   - native function-calling when the Ollama model supports it, or
   - a parsed text protocol: `<read path="x"/>`, `<grep pattern="x" path="x"/>`,
@@ -116,10 +127,32 @@ umbra --version             print the version
 | `/git` | re-detect git repo root |
 | `/cd <path>` | change the working directory |
 | `/cwd` | show working directory, repo root and branch |
+| `/pull <model>` | download a model from the Ollama registry |
+| `/yolo [on\|off]` | run with no confirmations, anywhere on the machine |
+| `/undo` | restore the last file the model overwrote |
+| `/audit` | show what has been edited and run |
 | `/quit` | exit |
 
 Keys: `tab` switch agent, `ctrl+p` command palette, `f2` model switcher,
-`ctrl+n` new session, `esc` interrupt the running turn, `ctrl+c` quit.
+`ctrl+e` expand/collapse the whole feed, `ctrl+n` new session, `esc` interrupt
+the running turn.
+
+Copying: drag to select and `ctrl+c`, right-click any feed row to copy it
+whole, or `f12` to hand the mouse back to your terminal (then its own
+selection and right-click work as usual). Clicking anywhere in the transcript
+puts the cursor back in the composer.
+
+## Total permission mode
+
+`/yolo on` (or `umbra --yolo`, or `auto_approve = true` in the config) removes
+every confirmation and lifts the git-repo requirement, so the agent edits and
+runs commands anywhere on the machine unattended. It is a real handoff — an
+uncensored 7B will occasionally do something wrong — so it comes with:
+
+- every overwritten file copied to `~/.umbra/backups` first,
+- `/undo` to put the last one back,
+- `~/.umbra/audit.log` recording every edit and command with a timestamp,
+- `esc` to interrupt a turn mid-flight.
 
 ## Config
 
@@ -131,6 +164,9 @@ model = "huihui_ai/qwen2.5-coder-abliterate:7b"
 context_window = 32768
 discovery_top_n = 6
 compact_ratio = 0.7
+auto_approve = false   # true = /yolo on at every launch
+require_git = true
+command_timeout = 120
 ```
 
 ## Stack
