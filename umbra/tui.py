@@ -25,7 +25,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Static
 
 from . import __version__
-from .activity import Activity, ActivityGroup, Thinking
+from .activity import Activity, ActivityGroup, Thinking, pulse_markup
 from .compaction import maybe_compact
 from .config import ensure_umbra_dir, load_config, write_setting
 from .discovery import discover_for_message
@@ -35,7 +35,7 @@ from .ollama_client import OllamaEngine
 from .palette import CommandPalette, ModelPicker
 from .sessions import SessionStore
 from .tokens import messages_tokens
-from .tools import ToolRunner, parse_text_tools
+from .tools import ToolRunner, parse_text_tools, strip_tool_tags
 
 PAL = {
     "read": "#67c01e",
@@ -160,6 +160,12 @@ def _clip_body(text: str) -> str:
     return text[:_BODY_LIMIT] + f"\n... ({len(text):,} chars total)"
 
 
+def _human_tokens(n: int) -> str:
+    if n >= 1000:
+        return f"{n / 1000:.1f}K"
+    return str(n)
+
+
 def _count(text: str, noun: str) -> str:
     if text.startswith("ERROR"):
         return "error"
@@ -272,7 +278,7 @@ class Umbra(App):
         Binding("tab", "cycle_agent", "agents", priority=True),
         Binding("f2", "pick_model", "model", priority=True),
         Binding("ctrl+n", "new_session", "new session"),
-        Binding("escape", "interrupt", "interrupt", show=False),
+        Binding("escape", "interrupt", "interrupt", priority=True, show=False),
         # Click-out recovery and copying. ctrl+c is already bound by Textual to
         # copy the drag-selection; these cover the rest.
         Binding("ctrl+shift+c", "copy_selection", "copy", show=False),
@@ -293,6 +299,10 @@ class Umbra(App):
         self._undo: list[tuple[str, str]] = []
         self._flash_text = ""
         self._mouse_off = False
+        self._armed = False
+        self._busy = False
+        self._pulse_frame = 0
+        self._pulse_timer = None
         self.workdir = (cwd or Path.cwd()).resolve()
         self.store = SessionStore()
         self.engine = OllamaEngine(self.host, self.model)
@@ -385,6 +395,44 @@ class Umbra(App):
                 where += "  [#6c7a89]·[/#6c7a89]  [#ffb454]no git repo[/#ffb454]"
             self._w["home-sub"].update(where)
 
+    def _render_status(self):
+        """Bottom-left: the pulse while it works, and how to stop it.
+
+        Kept separate from _render_chrome so the 8fps animation doesn't
+        re-count context tokens on every frame.
+        """
+        if self._busy:
+            pulse = pulse_markup(self._pulse_frame)
+            if getattr(self, "_armed", False):
+                key = ("[b #ffb454]esc again[/b #ffb454] "
+                       "[#ffb454]to interrupt[/#ffb454]")
+            else:
+                key = "[b #d4d4dc]esc[/b #d4d4dc] [#6c7a89]interrupt[/#6c7a89]"
+            self._w["hints-left"].update(f"{pulse}  {key}")
+        elif getattr(self, "_flash_text", ""):
+            self._w["hints-left"].update(f"[#a693f0]{self._flash_text}[/#a693f0]")
+        elif self._home:
+            self._w["hints-left"].update("")
+        else:
+            self._w["hints-left"].update(f"[#6c7a89]{self.session.name}[/#6c7a89]")
+
+    def _pulse_tick(self):
+        self._pulse_frame += 1
+        self._render_status()
+
+    def _set_busy(self, busy: bool):
+        self._busy = busy
+        if busy:
+            self._pulse_frame = 0
+            if self._pulse_timer is None:
+                self._pulse_timer = self.set_interval(1 / 8, self._pulse_tick)
+        else:
+            self._armed = False
+            if self._pulse_timer is not None:
+                self._pulse_timer.stop()
+                self._pulse_timer = None
+        self._render_status()
+
     def _render_chrome(self):
         """The composer meta line, the key hints, and the folder footer."""
         provider = self.host.replace("http://", "").replace("https://", "")
@@ -397,18 +445,8 @@ class Umbra(App):
             f"[#6c7a89]ollama[/#6c7a89] [#4a4a52]{provider}[/#4a4a52]"
         )
 
-        left = ""
-        if getattr(self, "_flash_text", ""):
-            left = f"[#a693f0]{self._flash_text}[/#a693f0]"
-        elif not self._home:
-            used = messages_tokens(self.session.messages) + self._turn_tokens
-            window = self.cfg.context_window
-            pct = int(100 * used / max(1, window))
-            color = "#ffb454" if pct > 60 else "#67c01e"
-            left = (
-                f"[#6c7a89]{self.session.name}[/#6c7a89]  "
-                f"[{color}]{pct}%[/{color}][#6c7a89] ctx[/#6c7a89]"
-            )
+        self._render_status()
+
         if getattr(self, "_mouse_off", False):
             hints = (
                 "[b #ffb454]f12[/b #ffb454] [#6c7a89]terminal mouse - "
@@ -420,7 +458,13 @@ class Umbra(App):
                 "[b #d4d4dc]ctrl+p[/b #d4d4dc] [#6c7a89]commands[/#6c7a89]   "
                 "[b #d4d4dc]ctrl+c[/b #d4d4dc] [#6c7a89]copy[/#6c7a89]"
             )
-        self._w["hints-left"].update(left)
+        if not self._home:
+            used = messages_tokens(self.session.messages) + self._turn_tokens
+            window = self.cfg.context_window
+            pct = int(100 * used / max(1, window))
+            color = "#ffb454" if pct > 60 else "#6c7a89"
+            hints = (f"[{color}]{_human_tokens(used)} ({pct}%)[/{color}]   "
+                     + hints)
         self._w["hints-right"].update(hints)
 
         where = f"{self.workdir}"
@@ -596,12 +640,50 @@ class Umbra(App):
         self.run_worker(self._pick_model(), name="modelpick")
 
     def action_interrupt(self):
-        """Cancel the running turn, or - if nothing is running - take the box back."""
+        """esc warns, esc again stops it.
+
+        One press is easy to hit by accident, so the first only arms the
+        interrupt for a few seconds; the second actually tears the turn down -
+        including the Ollama stream, which otherwise keeps generating in its
+        own thread long after the await is cancelled.
+        """
+        # This binding is priority, so it sees esc before any open modal does.
+        # Hand it back: esc should close the palette or answer "no" first.
+        if len(self.screen_stack) > 1:
+            screen = self.screen
+            cancel = getattr(screen, "action_cancel", None)
+            if callable(cancel):
+                cancel()
+            elif isinstance(screen, ConfirmScreen):
+                screen.dismiss(False)
+            return
+
+        # `_busy` is the source of truth, not the worker list: the pulse is
+        # what the user is looking at when they reach for esc.
+        if not self._busy:
+            self._armed = False
+            self.prompt.focus()
+            return
         running = [w for w in self.workers if w.name == "turn"]
+
+        if not getattr(self, "_armed", False):
+            self._armed = True
+            self._render_status()
+            self.set_timer(4, self._disarm)
+            return
+
+        self._armed = False
+        self.engine.cancelled = True        # ends generation at the next token
         for worker in running:
             worker.cancel()
-        if not running:
-            self.prompt.focus()
+        self._activity("warn", "interrupted", summary="stopped by esc")
+        self._set_busy(False)
+
+    def _disarm(self):
+        """The armed window lapses, so a stray esc can't kill a later turn."""
+        if getattr(self, "_armed", False):
+            self._armed = False
+            self._render_status()
 
     async def _pick_command(self):
         choice = await self.push_screen(CommandPalette(), wait_for_dismiss=True)
@@ -795,6 +877,113 @@ class Umbra(App):
         self._audit("undo", f"{target} <- {backup}")
         self._notice("Undo", f"restored {target}\nfrom {backup}")
 
+    def _where_hint(self, wanted: str = "") -> str:
+        """What folders actually exist, for a model that guessed a path.
+
+        Local models cheerfully invent `C:/projects/...`; this hands back the
+        real directories, plus anything whose name looks like what it wanted.
+        """
+        home = Path.home()
+        roots = [self.workdir, home, home / "Downloads" / "Projects",
+                 home / "Documents", home / "Desktop"]
+        lines = []
+        seen = set()
+        for root in roots:
+            if not root.is_dir() or str(root) in seen:
+                continue
+            seen.add(str(root))
+            try:
+                kids = sorted(p.name for p in root.iterdir() if p.is_dir()
+                              and not p.name.startswith("."))[:18]
+            except OSError:
+                continue
+            if kids:
+                lines.append(f"{root}:  " + ", ".join(kids))
+
+        needle = Path(wanted.strip("\"'")).name.lower() if wanted else ""
+        hits = []
+        if needle:
+            for root in (home / "Downloads" / "Projects", home / "Documents", home):
+                if not root.is_dir():
+                    continue
+                try:
+                    for p in root.iterdir():
+                        if p.is_dir() and needle.replace(" ", "") in p.name.lower().replace(" ", ""):
+                            hits.append(str(p))
+                except OSError:
+                    continue
+        out = "Directories that exist:\n" + "\n".join(lines)
+        if hits:
+            out += "\n\nProbably what you meant: " + ", ".join(dict.fromkeys(hits))
+        return out
+
+    @staticmethod
+    def _norm(name: str) -> str:
+        return re.sub(r"[\s_\-]", "", name).lower()
+
+    def _search_roots(self) -> list[Path]:
+        home = Path.home()
+        roots = [self.workdir, home / "Downloads" / "Projects", home / "Documents",
+                 home / "Desktop", home / "Downloads", home / "source" / "repos",
+                 home / "code", home]
+        return [r for r in dict.fromkeys(roots) if r.is_dir()]
+
+    def _resolve_dir(self, raw: str) -> Path | None:
+        """Find the folder the model *meant*.
+
+        Small models confidently invent paths - `C:/projects/discordforge` for
+        a folder that lives in Downloads/Projects. If the literal path misses,
+        match the last segment by name against the obvious places instead of
+        failing and letting it wander off into System32.
+        """
+        wanted = Path(raw.strip("\"' "))
+        literal = wanted if wanted.is_absolute() else self.workdir / wanted
+        try:
+            if literal.is_dir():
+                return literal.resolve()
+        except OSError:
+            pass
+
+        needle = self._norm(wanted.name)
+        if not needle:
+            return None
+        exact: list[Path] = []
+        partial: list[Path] = []
+        for root in self._search_roots():
+            try:
+                children = [p for p in root.iterdir() if p.is_dir()]
+            except OSError:
+                continue
+            for child in children:
+                name = self._norm(child.name)
+                if name == needle:
+                    exact.append(child)
+                elif needle in name or name in needle:
+                    partial.append(child)
+        for hit in exact + partial:
+            return hit.resolve()
+        return None
+
+    def _folder_context(self) -> str:
+        """A short, always-current note about where we are and what's around."""
+        try:
+            here = sorted(p.name + ("/" if p.is_dir() else "")
+                          for p in self.workdir.iterdir())[:30]
+        except OSError:
+            here = []
+        projects = Path.home() / "Downloads" / "Projects"
+        lines = [f"Current working directory: {self.workdir}"]
+        if here:
+            lines.append("It contains: " + ", ".join(here))
+        if projects.is_dir():
+            try:
+                kids = sorted(p.name for p in projects.iterdir() if p.is_dir())[:25]
+                lines.append(f"The user's projects live in {projects}: " + ", ".join(kids))
+            except OSError:
+                pass
+        lines.append("Use these real paths. Do not invent a path that is not listed.")
+        return "\n".join(lines)
+
     def _change_dir(self, raw: str, quiet: bool = False) -> tuple[bool, str]:
         """Re-root the session and repaint the footer.
 
@@ -805,19 +994,11 @@ class Umbra(App):
             if not quiet:
                 self._notice("Folder", str(self.workdir))
             return False, str(self.workdir)
-        target = Path(raw.strip("\"'")).expanduser()
-        if not target.is_absolute():
-            target = self.workdir / target
-        try:
-            target = target.resolve(strict=True)
-        except OSError:
+        target = self._resolve_dir(Path(raw.strip("\"'")).expanduser().as_posix())
+        if target is None:
             if not quiet:
                 self._notice("cd", f"no such directory: {raw}", prefix="warn")
             return False, f"no such directory: {raw}"
-        if not target.is_dir():
-            if not quiet:
-                self._notice("cd", f"not a directory: {target}", prefix="warn")
-            return False, f"not a directory: {target}"
         self.workdir = target
         self.root = find_repo_root(self.workdir)
         self.branch = current_branch(self.root)
@@ -900,6 +1081,7 @@ class Umbra(App):
     async def _handle_user(self, text: str):
         try:
             self._thinking = True
+            self._set_busy(True)
             if self._home:
                 self._render_home(False)
             self._append_user(text)
@@ -910,13 +1092,17 @@ class Umbra(App):
                 self.cfg.discovery_top_n, self.cfg.discovery_max_file_chars,
             )
             if files:
+                remaining = max(0, self.cfg.context_window // 4) * 4
                 for f in files:
+                    if remaining <= 0:
+                        break
                     try:
                         content = f.read_text(encoding="utf-8", errors="replace")
                     except OSError:
                         continue
                     rel = f.relative_to(self.root) if self.root else f
-                    short = content[: self.cfg.discovery_max_file_chars]
+                    short = content[: min(self.cfg.discovery_max_file_chars, remaining)]
+                    remaining -= len(short)
                     self._activity("context", str(rel), _clip_body(short),
                                    summary=_count(content, "lines"))
                     self.session.messages.append({
@@ -934,6 +1120,7 @@ class Umbra(App):
             self._add_block("Error", str(exc), prefix="warn")
         finally:
             self._thinking = False
+            self._set_busy(False)
             self._render_chrome()
             self.prompt.focus()
 
@@ -958,15 +1145,21 @@ class Umbra(App):
         return cb
 
     def _agent_messages(self) -> list[dict]:
-        """The session messages, with the active agent's rider on the system prompt."""
-        note = AGENT_NOTES.get(self.agent, "")
-        if not note:
-            return self.session.messages
+        """Session messages + the agent's rider + where we actually are.
+
+        The folder context is rebuilt every turn rather than stored, so it
+        always matches the current directory - and so the model has real paths
+        to reach for instead of inventing them.
+        """
         messages = list(self.session.messages)
-        for index, msg in enumerate(messages):
-            if msg.get("role") == "system":
-                messages[index] = {**msg, "content": str(msg.get("content", "")) + note}
-                break
+        note = AGENT_NOTES.get(self.agent, "")
+        if note:
+            for index, msg in enumerate(messages):
+                if msg.get("role") == "system":
+                    messages[index] = {**msg,
+                                       "content": str(msg.get("content", "")) + note}
+                    break
+        messages.append({"role": "system", "content": self._folder_context()})
         return messages
 
     async def _assistant_loop(self):
@@ -997,6 +1190,9 @@ class Umbra(App):
                 else:
                     stream.remove()
 
+            if self.engine.cancelled:
+                break
+
             if not native:
                 native = parse_text_tools(content)
 
@@ -1004,9 +1200,17 @@ class Umbra(App):
                 self.session.messages.append({"role": "assistant", "content": stream.text})
                 break
 
-            self._add_block("Tool", f"{len(native)} call(s) — running...", prefix="tool")
+            # The tool tags become feed rows, so don't also leave the raw XML
+            # sitting in the reply. What's left is the model's prose, if any.
+            prose = strip_tool_tags(stream.text)
+            if prose.strip():
+                stream.update(prose)
+                stream.text = prose
+            else:
+                stream.remove()
+
             assistant_msg = {"role": "assistant", "content": stream.text or content}
-            if self._engine_used_native(native, stream):
+            if self.engine.last_native:
                 assistant_msg["tool_calls"] = self._native_form(native)
             self.session.messages.append(assistant_msg)
 
@@ -1030,9 +1234,6 @@ class Umbra(App):
                             prefix="info")
         self.store.save(self.session)
         self._render_chrome()
-
-    def _engine_used_native(self, calls, stream) -> bool:
-        return any("arguments" in (c.get("arguments") or {}) for c in calls)
 
     def _native_form(self, calls) -> list[dict]:
         return [
@@ -1075,10 +1276,12 @@ class Umbra(App):
         if name == "cd":
             target = str(args.get("path", ""))
             ok, detail = self._change_dir(target, quiet=True)
-            row = self._activity("cd", detail if ok else target,
-                                 summary="moved" if ok else "not found")
+            self._activity("cd", detail if ok else target,
+                           summary="moved" if ok else "not found")
             if not ok:
-                return f"ERROR: {detail}", False
+                # A wrong guess should not end the turn - hand back what does
+                # exist nearby so the model can pick the real folder.
+                return f"ERROR: {detail}\n{self._where_hint(target)}", False
             return (f"OK - working directory is now {self.workdir} "
                     f"(git repo: {self.root or 'none'})"), True
 
@@ -1093,6 +1296,7 @@ class Umbra(App):
                 ok = await self.confirm("No git repo. Run `git init` so edits are tracked?")
                 if ok:
                     await self._git_init_now()
+                    runner.root = self.root
                 else:
                     return None, False
             pending = await asyncio.to_thread(
@@ -1117,7 +1321,8 @@ class Umbra(App):
                 if not ok:
                     return None, False
             backup = await asyncio.to_thread(
-                runner.apply_edit, args["path"], args["content"])
+                runner.apply_edit, args["path"], args["content"],
+                expected_old=pending["old"], expected_exists=pending["existed"])
             target = pending.get("path", args["path"])
             if backup:
                 self._undo.append((target, backup))
@@ -1126,9 +1331,10 @@ class Umbra(App):
 
         if name == "run":
             if self.root is None and not self.yes:
-                ok = await self.confirm("No git repo. Run `git init` so commands are sandboxed?")
+                ok = await self.confirm("No git repo. Run `git init` before commands are allowed?")
                 if ok:
                     await self._git_init_now()
+                    runner.root = self.root
                 else:
                     return None, False
             command = str(args.get("command", ""))

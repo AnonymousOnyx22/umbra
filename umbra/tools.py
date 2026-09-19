@@ -19,8 +19,11 @@ and commands run anywhere on the machine. Overwrites are always copied to
 from __future__ import annotations
 
 import difflib
+import os
 import re
 import subprocess
+import tempfile
+import uuid
 from pathlib import Path
 
 TOOL_SCHEMA = [
@@ -120,6 +123,8 @@ _TEXT_TOOLS = [
     (re.compile(r'<read\s+path="([^"]+)"\s*/>', re.I), "read"),
     (re.compile(r"<grep\s+pattern='([^']+)'\s*path='([^']+)'\s*/>", re.I), "grep"),
     (re.compile(r'<grep\s+pattern="([^"]+)"\s*path="([^"]+)"\s*/>', re.I), "grep"),
+    (re.compile(r"<grep\s+pattern='([^']+)'\s*/>", re.I), "grep"),
+    (re.compile(r'<grep\s+pattern="([^"]+)"\s*/>', re.I), "grep"),
     (re.compile(r"<ls\s+path='([^']+)'\s*/>", re.I), "ls"),
     (re.compile(r'<ls\s+path="([^"]+)"\s*/>', re.I), "ls"),
     (re.compile(r"<cd\s+path='([^']+)'\s*/>", re.I), "cd"),
@@ -134,18 +139,33 @@ _TEXT_TOOLS = [
 
 def parse_text_tools(text: str) -> list[dict]:
     """Parse text-protocol tool calls out of model output."""
-    calls: list[dict] = []
+    matches = []
     for rx, name in _TEXT_TOOLS:
         for m in rx.finditer(text):
-            groups = list(m.groups())
-            if name in ("grep",):
-                calls.append({"name": "grep", "arguments": {"pattern": groups[0], "path": groups[1]}})
-            elif name == "edit":
-                calls.append({"name": "edit", "arguments": {"path": groups[0], "content": groups[1]}})
-            else:
-                key = "path" if name in ("read", "ls", "cd") else "command"
-                calls.append({"name": name, "arguments": {key: groups[0]}})
+            matches.append((m.start(), name, m))
+    calls: list[dict] = []
+    for _, name, m in sorted(matches, key=lambda item: item[0]):
+        groups = list(m.groups())
+        if name == "grep":
+            calls.append({"name": "grep", "arguments": {
+                "pattern": groups[0], "path": groups[1] if len(groups) > 1 else "."}})
+        elif name == "edit":
+            calls.append({"name": "edit", "arguments": {"path": groups[0], "content": groups[1]}})
+        else:
+            key = "path" if name in ("read", "ls", "cd") else "command"
+            calls.append({"name": name, "arguments": {key: groups[0]}})
     return calls
+
+
+def strip_tool_tags(text: str) -> str:
+    """Remove tool-protocol tags from a reply, leaving the prose behind.
+
+    The tags are rendered as rows in the activity feed, so showing the raw XML
+    as well is just noise.
+    """
+    for rx, _name in _TEXT_TOOLS:
+        text = rx.sub("", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def normalize_calls(tool_calls) -> list[dict]:
@@ -192,15 +212,9 @@ def backup_file(path: Path) -> str | None:
     if not path.is_file():
         return None
     import shutil
-    import time
-
-    stamp = time.strftime("%Y%m%d-%H%M%S")
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(path))
-    dest = backup_dir() / f"{stamp}_{safe[-120:]}"
-    try:
-        shutil.copy2(path, dest)
-    except OSError:
-        return None
+    dest = backup_dir() / f"{uuid.uuid4().hex}_{safe[-120:]}"
+    shutil.copy2(path, dest)
     return str(dest)
 
 
@@ -223,8 +237,12 @@ class ToolRunner:
         self.timeout = timeout
 
     def _check_in_repo(self, path: Path) -> None:
-        if self.require_git and self.root is None:
+        if not self.require_git:
+            return
+        if self.root is None:
             raise RuntimeError("no git repository detected - run git init first")
+        if not path.resolve().is_relative_to(self.root.resolve()):
+            raise RuntimeError(f"edit target is outside the git repository: {path}")
 
     def read(self, path: str) -> str:
         p = _resolve(self.root or self.workdir, self.workdir, path)
@@ -276,7 +294,6 @@ class ToolRunner:
     def edit(self, path: str, content: str) -> dict:
         p = _resolve(self.root or self.workdir, self.workdir, path)
         self._check_in_repo(p)
-        p.parent.mkdir(parents=True, exist_ok=True)
         old = p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
         if old == content:
             return {"status": "unchanged", "diff": "", "path": str(p)}
@@ -288,18 +305,39 @@ class ToolRunner:
                 tofile=str(p),
             )
         )
-        return {"status": "pending", "diff": diff, "path": str(p), "content": content, "old": old}
+        return {"status": "pending", "diff": diff, "path": str(p), "content": content,
+                "old": old, "existed": p.is_file()}
 
-    def apply_edit(self, path: str, content: str) -> str | None:
+    def apply_edit(self, path: str, content: str, *, expected_old: str | None = None,
+                   expected_exists: bool | None = None) -> str | None:
         """Write the file, returning the backup path of what was there before."""
         p = _resolve(self.root or self.workdir, self.workdir, path)
+        self._check_in_repo(p)
+        exists = p.is_file()
+        if expected_exists is not None and exists != expected_exists:
+            raise RuntimeError(f"file changed since preview: {p}")
+        if expected_old is not None and exists and p.read_text(encoding="utf-8", errors="replace") != expected_old:
+            raise RuntimeError(f"file changed since preview: {p}")
         backup = backup_file(p)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="",
+                                             dir=p.parent, prefix=f".{p.name}.",
+                                             suffix=".tmp", delete=False) as fh:
+                temp_path = Path(fh.name)
+                fh.write(content)
+            if exists:
+                os.chmod(temp_path, p.stat().st_mode)
+            os.replace(temp_path, p)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
         return backup
 
     def run(self, command: str) -> str:
-        self._check_in_repo(self.workdir)
+        if self.require_git and self.root is None:
+            raise RuntimeError("no git repository detected - run git init first")
         try:
             proc = subprocess.run(
                 command,

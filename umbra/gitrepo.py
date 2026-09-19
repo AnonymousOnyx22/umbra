@@ -40,7 +40,7 @@ def list_files(repo_root: Path, workdir: Path) -> list[Path]:
     """
     try:
         out = subprocess.run(
-            ["git", "ls-files", "-c", "-o", "--exclude-standard"],
+            ["git", "ls-files", "-z", "-c", "-o", "--exclude-standard"],
             cwd=str(repo_root),
             capture_output=True,
             text=True,
@@ -48,12 +48,12 @@ def list_files(repo_root: Path, workdir: Path) -> list[Path]:
         )
         if out.returncode == 0:
             files = []
-            for line in out.stdout.splitlines():
-                line = line.strip()
+            base = workdir.resolve()
+            for line in out.stdout.split("\0"):
                 if not line:
                     continue
-                p = repo_root / line
-                if p.is_file():
+                p = (repo_root / line).resolve()
+                if p.is_file() and p.is_relative_to(base):
                     files.append(p)
             return files
     except Exception:

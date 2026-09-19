@@ -16,6 +16,9 @@ class OllamaEngine:
         self.host = host
         self.model = model
         self._ollama = None
+        # Flipped by the UI on interrupt; the stream loop checks it per token.
+        self.cancelled = False
+        self.last_native = False
 
     def _client(self):
         if self._ollama is None:
@@ -42,13 +45,30 @@ class OllamaEngine:
         if tools:
             kwargs["tools"] = TOOL_SCHEMA
         stream = client.chat(**kwargs)
-        final = {}
+        final: dict = {}
+        whole: list[str] = []
+        tool_calls = []
         for part in stream:
+            if self.cancelled:
+                # Stop pulling tokens; closing the generator ends generation.
+                try:
+                    stream.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                break
             msg = part.get("message", {})
             content = msg.get("content")
             if content:
+                whole.append(content)
                 on_chunk(content)
+            if msg.get("tool_calls"):
+                tool_calls = msg["tool_calls"]
             final = msg
+        # `final` is only the LAST chunk, so its content is the last token.
+        # The text protocol needs the whole reply to find tool tags in it.
+        final = dict(final)
+        final["content"] = "".join(whole)
+        final["tool_calls"] = tool_calls
         return final
 
     async def chat(
@@ -63,6 +83,8 @@ class OllamaEngine:
         support). Retry once without native tools and rely on the parsed XML
         text protocol instead.
         """
+        self.cancelled = False
+        self.last_native = False
         tools_enabled = tools
         final = {}
         for attempt in range(2):
@@ -77,6 +99,7 @@ class OllamaEngine:
                     continue
                 raise self._raise_dep_missing(exc) from exc
         calls = normalize_calls(final.get("tool_calls", []))
+        self.last_native = bool(calls)
         return calls, final.get("content", "") or ""
     def list_models(self) -> list[str]:
         """Model names available on the Ollama host (empty list on failure)."""

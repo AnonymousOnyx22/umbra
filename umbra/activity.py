@@ -165,6 +165,27 @@ class Activity(Vertical):
         return f"{label}  {self.title_text}\n{self._body_text}"
 
 
+PULSE_TRACK = 8
+PULSE_BLOCK = 3
+
+
+def pulse_markup(frame: int, color: str = "#8b74e8", dim: str = "#3a3a45") -> str:
+    """A block sliding back and forth along a track of dots.
+
+    The bottom-left "something is happening" tell, borrowed from opencode.
+    """
+    span = PULSE_TRACK - PULSE_BLOCK
+    cycle = span * 2
+    pos = frame % cycle
+    if pos > span:
+        pos = cycle - pos
+    cells = []
+    for i in range(PULSE_TRACK):
+        lit = pos <= i < pos + PULSE_BLOCK
+        cells.append(f"[{color}]▪[/{color}]" if lit else f"[{dim}]·[/{dim}]")
+    return "".join(cells)
+
+
 class Thinking(Static):
     """The pause between sending and the first token, made visible.
 

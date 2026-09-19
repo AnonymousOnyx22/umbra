@@ -31,6 +31,14 @@ makes. No cloud APIs, no keys, no account; a session costs $0.00.
   the version on the right. Send a message and the home screen gives way to the
   streaming transcript, with the session name and context usage moving into the
   hint row.
+- **It knows where your folders are.** The current directory listing and your
+  projects folder go into every turn's context, and `cd` matches by name — so
+  "go to discordforge" lands in `Downloads/Projects/DiscordForge` even when the
+  model guesses `C:/projects/discordforge`.
+- **A working pulse in the bottom left** while a turn runs, next to
+  `esc interrupt`. One `esc` arms it (`esc again to interrupt`), the second
+  stops the turn *and* the Ollama stream; the arming lapses after 4s so a
+  stray press can't kill a later turn.
 - **A thinking animation** between sending and the first token — spinner, the
   ghost's eyes blinking, and a running clock, so a slow local model never looks
   like a hung one.
@@ -140,8 +148,8 @@ umbra --version             print the version
 | `/quit` | exit |
 
 Keys: `tab` switch agent, `ctrl+p` command palette, `f2` model switcher,
-`ctrl+e` expand/collapse the whole feed, `ctrl+n` new session, `esc` interrupt
-the running turn.
+`ctrl+e` expand/collapse the whole feed, `ctrl+n` new session, `esc` twice to
+interrupt the running turn (once to close a dialog).
 
 Copying: drag to select and `ctrl+c`, right-click any feed row to copy it
 whole, or `f12` to hand the mouse back to your terminal (then its own
